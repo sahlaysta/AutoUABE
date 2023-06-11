@@ -19,6 +19,7 @@
 #include "../UABE_Win32/BatchImportDialog.h"
 #include "../UABE_Win32/FileDialog.h"
 #include "Texture.h"
+#include <fstream>
 
 #define IsPowerOfTwo(n) ((n!=0)&&!(n&(n-1)))
 
@@ -537,7 +538,15 @@ public:
 	{
 		return taskName;
 	}
-	TaskResult execute(TaskProgressManager& progressManager)
+	TaskResult execute(TaskProgressManager& progressManager) {
+		TaskResult ret = bulk_originalExecute(progressManager);
+
+		if (appContext.bulk_isImport)
+			appContext.bulk_importedtextures = true;
+
+		return ret;
+	}
+	TaskResult bulk_originalExecute(TaskProgressManager& progressManager)
 	{
 		unsigned int progressRange = static_cast<unsigned int>(std::min<size_t>(pDialogDesc->importParameters.size(), 10000));
 		size_t assetsPerProgressStep = pDialogDesc->importParameters.size() / progressRange;
@@ -566,7 +575,12 @@ public:
 				InitializeImportParam(pImportParam.get(), appContext);
 			}
 
+			if (appContext.bulk_isBulk && pDialogDesc->getImportFilePath(i).empty()) {
+				continue;
+			}
+
 			pImportParam->batchInfo.batchFilenameOverride = pDialogDesc->getImportFilePath(i);
+
 			try {
 				FinalizeTextureEdit(pImportParam.get(), progressManager);
 			}
@@ -796,6 +810,9 @@ public:
 			{
 				if (apply && pDialogDesc != nullptr)
 				{
+					if (appContext.bulk_isBulk) {
+						while (appContext.taskManager.getNumThreadsWorking() > 0);
+					}
 					auto pTask = std::make_shared<TextureEditTask>(appContext, std::move(pDialogDesc));
 					appContext.taskManager.enqueue(pTask);
 				}
@@ -805,6 +822,9 @@ public:
 		);
 	}
 	virtual ~TextureEditModifyDialog() {}
+	void bulk_doinitok() {
+		batchImportDialog.bulk_doinitok();
+	}
 	//Called when the user requests to close the tab.
 	//Returns true if there are unsaved changes, false otherwise.
 	//If the function will return true and applyable is not null,
@@ -875,7 +895,11 @@ public:
 		void operator()()
 		{
 			auto pDialogDesc = std::make_unique<TextureBatchImportDialogDesc>(appContext, std::move(selection), "\\.(?:tga|png)");
-			if (pDialogDesc->getElements().size() > 1)
+			if (appContext.bulk_isImport) {
+				auto pModifyDialog = std::make_shared<TextureEditModifyDialog>(std::move(pDialogDesc), appContext.bulk_importdir, appContext, listDialog);
+				pModifyDialog->bulk_doinitok();
+			}
+			else if (pDialogDesc->getElements().size() > 1)
 			{
 				WCHAR* folderPathW = nullptr;
 				if (!ShowFolderSelectDialog(appContext.getMainWindow().getWindow(), &folderPathW, L"Select an input directory", UABE_FILEDIALOG_EXPIMPASSET_GUID))
@@ -907,7 +931,7 @@ public:
 		std::vector<AssetUtilDesc> selection,
 		std::string& optionName)
 	{
-		if (!PluginSupportsElements(selection))
+		if (!appContext.bulk_isBulk && !PluginSupportsElements(selection))
 			return nullptr;
 		optionName = "Edit";
 		return std::make_unique<Runner>(appContext, listDialog, std::move(selection));

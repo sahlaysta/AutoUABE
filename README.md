@@ -1,4 +1,24 @@
-# Asset Bundle Extractor
+# AutoUABE
+
+Fork of [UABE by SeriousCache](https://github.com/SeriousCache/UABE)
+
+Adds support for command line arguments to automate the GUI.
+
+Right now it supports exporting/importing text assets and Texture2D assets.
+
+- openlist.txt: contains the files you want to open, separated by new line
+- dlldir: the directory of the Unity DLL files, this is usually the Unity game 'Managed' folder
+
+Export:
+
+`AssetBundleExtractor.exe bulkexport --openlist <openlist.txt> --dlldir <dlldir> --exportdir <exportdir>`
+
+Import:
+
+`AssetBundleExtractor.exe bulkimport --openlist <openlist.txt> --dlldir <dlldir> --importdir <importdir> --savedir <savedir>`
+
+---
+
 .assets and AssetBundle editor.  
 Not affiliated with Unity Technologies.
 

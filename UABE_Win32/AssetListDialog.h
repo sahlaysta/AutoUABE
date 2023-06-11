@@ -28,25 +28,25 @@ public:
 	// *applyable will be set to true iff applyNow() is assumed to succeed without further interaction
 	// (e.g. all fields in the dialog have a valid value, ...).
 	//The caller uses this info to decide whether and how it should display a confirmation dialog before proceeding.
-	virtual bool hasUnappliedChanges(bool *applyable=nullptr)=0;
+	virtual bool hasUnappliedChanges(bool* applyable = nullptr) = 0;
 	//Called when the user requests to apply the changes (e.g. selecting Apply, Save or Save All in the menu).
 	//Returns whether the changes have been applied;
 	// if true, the caller may continue closing the AssetModifyDialog.
 	// if false, the caller shall stop closing the AssetModifyDialog.
 	//Note: applyChanges() is expected to notify the user about errors (e.g. via MessageBox).
-	virtual bool applyChanges()=0;
-	virtual std::string getTabName()=0;
-	virtual HWND getWindowHandle()=0;
+	virtual bool applyChanges() = 0;
+	virtual std::string getTabName() = 0;
+	virtual HWND getWindowHandle() = 0;
 	//Called for unhandled WM_COMMAND messages. Returns true if this dialog has handled the request, false otherwise.
-	virtual bool onCommand(WPARAM wParam, LPARAM lParam)=0;
-	virtual void onHotkey(ULONG message, DWORD keyCode)=0; //message : currently only WM_KEYDOWN; keyCode : VK_F3 for instance
+	virtual bool onCommand(WPARAM wParam, LPARAM lParam) = 0;
+	virtual void onHotkey(ULONG message, DWORD keyCode) = 0; //message : currently only WM_KEYDOWN; keyCode : VK_F3 for instance
 	//Called when the dialog is to be shown. The parent window will not change before the next onHide call.
-	virtual void onShow(HWND hParentWnd)=0;
+	virtual void onShow(HWND hParentWnd) = 0;
 	//Called when the dialog is to be hidden, either because of a tab switch or while closing the tab.
-	virtual void onHide()=0;
+	virtual void onHide() = 0;
 	//Called when the tab is about to be destroyed.
 	//Once this function is called, AssetListDialog::removeModifyDialog must not be used for this dialog.
-	virtual void onDestroy()=0;
+	virtual void onDestroy() = 0;
 
 	friend class AssetListDialog;
 };
@@ -138,31 +138,31 @@ class AssetListDialog : public IFileManipulateDialog, public MainWindowEventHand
 	//Caches AssetInfo elements for assets of a file. Registers itself on the FileEntryUIInfo pointer.
 	struct FileEntryCache : public MainWindowEventHandler, public UIDisposableCache
 	{
-		class Win32AppContext *pContext;
-		MainWindowEventHandlerHandle eventHandlerHandle; 
+		class Win32AppContext* pContext;
+		MainWindowEventHandlerHandle eventHandlerHandle;
 		size_t nUsers;
 		time_t lastUseTime;
 
-		
-		FileEntryCache(FileEntryUIInfo *pUIInfo, Win32AppContext *pContext);
+
+		FileEntryCache(FileEntryUIInfo* pUIInfo, Win32AppContext* pContext);
 		~FileEntryCache();
 		size_t approxMemory();
 		time_t getLastUseTime();
 		bool isInUse();
 
-		void onUpdateContainers(AssetsFileContextInfo *pFile);
-		void onChangeAsset(AssetsFileContextInfo *pFile, pathid_t pathID, bool wasRemoved);
+		void onUpdateContainers(AssetsFileContextInfo* pFile);
+		void onChangeAsset(AssetsFileContextInfo* pFile, pathid_t pathID, bool wasRemoved);
 
-		FileEntryUIInfo *pUIInfo;
+		FileEntryUIInfo* pUIInfo;
 		std::unordered_map<pathid_t, AssetInfo> assetCache;
 	};
 	typedef UIDisposableCacheRef<FileEntryCache> FileEntryCacheRef;
-	inline AssetInfo *tryGetCacheEntry(unsigned int fileID, pathid_t pathID)
+	inline AssetInfo* tryGetCacheEntry(unsigned int fileID, pathid_t pathID)
 	{
 		auto fileIt = fileEntries.find(fileID);
 		if (fileIt != fileEntries.end())
 		{
-			FileEntryCache &cache = *fileIt->second.get();
+			FileEntryCache& cache = *fileIt->second.get();
 			auto entryIt = cache.assetCache.find(pathID);
 			if (entryIt != cache.assetCache.end())
 			{
@@ -218,54 +218,54 @@ public:
 			: fileID(fileID), pathID(pathID), isSelected(isSelected)
 		{}
 	};
-	inline std::string *getName(unsigned int fileID, pathid_t pathID)
+	inline std::string* getName(unsigned int fileID, pathid_t pathID)
 	{
-		if (AssetInfo *pInfo = tryGetCacheEntry(fileID, pathID)) return &pInfo->name;
+		if (AssetInfo* pInfo = tryGetCacheEntry(fileID, pathID)) return &pInfo->name;
 		return nullptr;
 	}
-	inline std::string *getContainerName(unsigned int fileID, pathid_t pathID)
+	inline std::string* getContainerName(unsigned int fileID, pathid_t pathID)
 	{
-		if (AssetInfo *pInfo = tryGetCacheEntry(fileID, pathID)) return &pInfo->containerName;
+		if (AssetInfo* pInfo = tryGetCacheEntry(fileID, pathID)) return &pInfo->containerName;
 		return nullptr;
 	}
-	inline std::string *getTypeName(unsigned int fileID, pathid_t pathID)
+	inline std::string* getTypeName(unsigned int fileID, pathid_t pathID)
 	{
-		if (AssetInfo *pInfo = tryGetCacheEntry(fileID, pathID)) return &pInfo->typeName;
+		if (AssetInfo* pInfo = tryGetCacheEntry(fileID, pathID)) return &pInfo->typeName;
 		return nullptr;
 	}
 	inline uint64_t getSize(unsigned int fileID, pathid_t pathID)
 	{
-		if (AssetInfo *pInfo = tryGetCacheEntry(fileID, pathID)) return pInfo->size;
+		if (AssetInfo* pInfo = tryGetCacheEntry(fileID, pathID)) return pInfo->size;
 		return 0;
 	}
 	inline uint32_t getTypeID(unsigned int fileID, pathid_t pathID)
 	{
-		if (AssetInfo *pInfo = tryGetCacheEntry(fileID, pathID)) return pInfo->typeID;
+		if (AssetInfo* pInfo = tryGetCacheEntry(fileID, pathID)) return pInfo->typeID;
 		return (uint32_t)INT32_MIN;
 	}
 	inline uint16_t getMonoScriptID(unsigned int fileID, pathid_t pathID)
 	{
-		if (AssetInfo *pInfo = tryGetCacheEntry(fileID, pathID)) return pInfo->monoScriptID;
+		if (AssetInfo* pInfo = tryGetCacheEntry(fileID, pathID)) return pInfo->monoScriptID;
 		return 0xFFFF;
 	}
 	inline bool getIsModified(unsigned int fileID, pathid_t pathID)
 	{
-		if (AssetInfo *pInfo = tryGetCacheEntry(fileID, pathID)) return pInfo->isModified;
+		if (AssetInfo* pInfo = tryGetCacheEntry(fileID, pathID)) return pInfo->isModified;
 		return false;
 	}
 
 	UABE_Win32_API void addModifyDialog(std::shared_ptr<AssetModifyDialog> dialog);
-	UABE_Win32_API void removeModifyDialog(AssetModifyDialog *pDialog);
-	UABE_Win32_API std::shared_ptr<AssetModifyDialog> getModifyDialogRef(AssetModifyDialog *pDialog);
+	UABE_Win32_API void removeModifyDialog(AssetModifyDialog* pDialog);
+	UABE_Win32_API std::shared_ptr<AssetModifyDialog> getModifyDialogRef(AssetModifyDialog* pDialog);
 private:
 	MainWindowEventHandlerHandle eventHandlerHandle;
-	class Win32AppContext *pContext;
+	class Win32AppContext* pContext;
 	HWND hDialog; bool windowUpdateScheduled; bool selectionUpdateScheduled;
 	HWND hParentWnd;
 	HMENU hCurPopupMenu = NULL;
-	std::unordered_map<unsigned int,FileEntryCacheRef> fileEntries;
+	std::unordered_map<unsigned int, FileEntryCacheRef> fileEntries;
 	std::vector<ListEntry> listEntries; //The assets in the list control order. pFile, pathID
-	
+
 	std::list<std::shared_ptr<AssetModifyDialog>> modifyDialogs;
 	std::shared_ptr<AssetModifyDialog> pActiveModifyDialog;
 
@@ -302,19 +302,19 @@ private:
 	void listEntryInsertSorted(ListEntry newEntry, size_t targetIdx = (size_t)-1);
 	void resort();
 
-	void getContainerInfo(AssetsFileContextInfo *pContextInfo, pathid_t pathID, OUT std::string &baseName, OUT std::string &containerListName);
+	void getContainerInfo(AssetsFileContextInfo* pContextInfo, pathid_t pathID, OUT std::string& baseName, OUT std::string& containerListName);
 	//Assumes that iItem has been bounds checked already (i.e. 0 <= iItem < listEntries.size()).
 	//newTextBuf will be created with new TCHAR[].
-	void getEntryText(int iItem, int iSubItem, AssetInfo &entry, OUT std::unique_ptr<TCHAR[]> &newTextBuf);
+	void getEntryText(int iItem, int iSubItem, AssetInfo& entry, OUT std::unique_ptr<TCHAR[]>& newTextBuf);
 
 	//Updates the right half description depending on selection.
 	void updateSelectionDesc();
 
 	void requestRemoveSelectedAssets();
 
-	bool preDeleteTab(MC_NMMTCLOSEITEM *pNotification);
-	void onDeleteTab(MC_NMMTDELETEITEM *pNotification);
-	void onSwitchTabs(MC_NMMTSELCHANGE *pNotification);
+	bool preDeleteTab(MC_NMMTCLOSEITEM* pNotification);
+	void onDeleteTab(MC_NMMTDELETEITEM* pNotification);
+	void onSwitchTabs(MC_NMMTSELCHANGE* pNotification);
 
 	void openViewDataTab(size_t selection = SIZE_MAX);
 	void onExportDumpButton();
@@ -328,17 +328,17 @@ private:
 		inline NameTypeCacheValue()
 			: nameChildIdx(0), hasName(false), templateBase()
 		{}
-		inline NameTypeCacheValue(DWORD nameChildIdx, AssetTypeTemplateField &&templateBase)
+		inline NameTypeCacheValue(DWORD nameChildIdx, AssetTypeTemplateField&& templateBase)
 			: nameChildIdx(nameChildIdx), templateBase(std::move(templateBase))
 		{}
-		NameTypeCacheValue(const NameTypeCacheValue &other) = delete;
-		inline NameTypeCacheValue(NameTypeCacheValue &&other)
+		NameTypeCacheValue(const NameTypeCacheValue& other) = delete;
+		inline NameTypeCacheValue(NameTypeCacheValue&& other)
 			: nameChildIdx(other.nameChildIdx), hasName(other.hasName), templateBase(std::move(other.templateBase))
 		{
 			other.hasName = false;
 		}
-		NameTypeCacheValue &operator=(const NameTypeCacheValue &other) = delete;
-		inline NameTypeCacheValue &operator=(NameTypeCacheValue &&other)
+		NameTypeCacheValue& operator=(const NameTypeCacheValue& other) = delete;
+		inline NameTypeCacheValue& operator=(NameTypeCacheValue&& other)
 		{
 			nameChildIdx = other.nameChildIdx;
 			hasName = other.hasName;
@@ -347,18 +347,18 @@ private:
 			return (*this);
 		}
 	};
-	bool TryRetrieveAssetNameField(AssetsFileContextInfo *pContextInfo, AssetIdentifier &identifier, std::string &nameOut,
-		std::unordered_map<NameTypeCacheKey, NameTypeCacheValue> &nameTypesCache);
+	bool TryRetrieveAssetNameField(AssetsFileContextInfo* pContextInfo, AssetIdentifier& identifier, std::string& nameOut,
+		std::unordered_map<NameTypeCacheKey, NameTypeCacheValue>& nameTypesCache);
 	//Generates cache info for listEntries [start,end).
 	//pFirstEntry (out) : The cache info for listEntries[start]
 	//nMax : A limit on how many new items should be cached.
 	//maxVisitedIndex (out, optional) : Receives the index after the highest (i.e. the last) visited list entry. Useful for overridden nMax.
 	//                                  Set to start if no element was visited.
 	//Returns the amount of new cached items.
-	size_t cacheEntries(size_t start, size_t end, AssetInfo *&pFirstEntry, size_t nMax = SIZE_MAX, size_t *maxVisitedIndex = nullptr);
-	inline void cacheEntry(size_t start, AssetInfo *&pFirstEntry)
+	size_t cacheEntries(size_t start, size_t end, AssetInfo*& pFirstEntry, size_t nMax = SIZE_MAX, size_t* maxVisitedIndex = nullptr);
+	inline void cacheEntry(size_t start, AssetInfo*& pFirstEntry)
 	{
-		cacheEntries(start, start+1, pFirstEntry);
+		cacheEntries(start, start + 1, pFirstEntry);
 	}
 	std::array<std::unique_ptr<TCHAR[]>, 4> lvStringBuf_Ownerdata;
 	std::array<std::unique_ptr<TCHAR[]>, 4> lvStringBuf_Tooltip;
@@ -367,48 +367,57 @@ protected:
 	static INT_PTR CALLBACK GotoDlgProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
 	static INT_PTR CALLBACK SearchDlgProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
 	static INT_PTR CALLBACK AssetListProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
-	static LRESULT CALLBACK ListViewSubclassProc(HWND hWnd, UINT uMsg, 
-		WPARAM wParam, LPARAM lParam, 
+	static LRESULT CALLBACK ListViewSubclassProc(HWND hWnd, UINT uMsg,
+		WPARAM wParam, LPARAM lParam,
 		uintptr_t uIdSubclass, DWORD_PTR dwRefData);
 public:
 	~AssetListDialog();
-	AssetListDialog(class Win32AppContext *pContext, HWND hParentWnd);
+	AssetListDialog(class Win32AppContext* pContext, HWND hParentWnd);
+	void bulk_SelectAllAssets();
+	int bulk_nListEntries() {
+		return this->listEntries.size();
+	}
+	void bulk_ExportAllAssets();
+	void bulk_ExportAllTexture2D();
+	void bulk_ImportAllTexture2D();
+	void bulk_ImportAllAssets();
+	static void writeNotifyFile(std::string notifyfile, void* mainWindow);
 	EFileManipulateDialogType getType();
-	void addFileContext(const std::pair<FileEntryUIInfo*,uintptr_t> &fileContext);
-	void removeFileContext(FileEntryUIInfo *pEntryInfo);
+	void addFileContext(const std::pair<FileEntryUIInfo*, uintptr_t>& fileContext);
+	void removeFileContext(FileEntryUIInfo* pEntryInfo);
 	HWND getWindowHandle();
 	void onHotkey(ULONG message, DWORD keyCode); //message : currently only WM_KEYDOWN; keyCode : VK_F3 for instance
 	bool onCommand(WPARAM wParam, LPARAM lParam); //Called for unhandled WM_COMMAND messages. Returns true if this dialog has handled the request, false otherwise.
-	
-	void onUpdateContainers(AssetsFileContextInfo *pFile);
-	void onChangeAsset(AssetsFileContextInfo *pFile, pathid_t pathID, bool wasRemoved);
+
+	void onUpdateContainers(AssetsFileContextInfo* pFile);
+	void onChangeAsset(AssetsFileContextInfo* pFile, pathid_t pathID, bool wasRemoved);
 
 	void onShow();
 	void onHide();
 
-	bool hasUnappliedChanges(bool *applyable=nullptr);
+	bool hasUnappliedChanges(bool* applyable = nullptr);
 	bool applyChanges();
 	bool doesPreferNoAutoclose();
 
 	UABE_Win32_API void switchToListTab();
 	UABE_Win32_API bool openViewDataTab(unsigned int fileID, pathid_t pathID);
 	UABE_Win32_API bool selectAsset(unsigned int fileID, pathid_t pathID);
-	
+
 	UABE_Win32_API std::vector<AssetUtilDesc> getSelectedAssets();
 
 	//Assumes all assets have resolved AssetIdentifiers already.
 	template <class TaskGenerator>
-	requires std::invocable<const TaskGenerator&, std::vector<AssetUtilDesc>, std::string>
-		&& std::convertible_to<std::invoke_result_t<const TaskGenerator&, std::vector<AssetUtilDesc>, std::string>, std::shared_ptr<AssetExportTask>>
-	UABE_Win32_API void exportAssetsBy(std::vector<AssetUtilDesc> assets,
-		const TaskGenerator& taskGenerator, std::string extension, std::string extensionFilter);
+		requires std::invocable<const TaskGenerator&, std::vector<AssetUtilDesc>, std::string>
+	&& std::convertible_to<std::invoke_result_t<const TaskGenerator&, std::vector<AssetUtilDesc>, std::string>, std::shared_ptr<AssetExportTask>>
+		UABE_Win32_API void exportAssetsBy(std::vector<AssetUtilDesc> assets,
+			const TaskGenerator& taskGenerator, std::string extension, std::string extensionFilter);
 
 	//Assumes all assets have resolved AssetIdentifiers already.
 	template <class AssetExportTaskT>
-	requires std::derived_from<AssetExportTaskT, AssetExportTask>
-		&& std::constructible_from<AssetExportTaskT, std::vector<AssetUtilDesc>, std::string, std::string, std::string, bool>
-	inline void exportAssetsBy(std::vector<AssetUtilDesc> assets,
-		std::string extension, std::string extensionFilter, std::string taskName, bool stopOnError = false)
+		requires std::derived_from<AssetExportTaskT, AssetExportTask>
+	&& std::constructible_from<AssetExportTaskT, std::vector<AssetUtilDesc>, std::string, std::string, std::string, bool>
+		inline void exportAssetsBy(std::vector<AssetUtilDesc> assets,
+			std::string extension, std::string extensionFilter, std::string taskName, bool stopOnError = false)
 	{
 		return exportAssetsBy(std::move(assets),
 			[&](std::vector<AssetUtilDesc> assets, std::string baseDir) {
@@ -418,10 +427,10 @@ public:
 	}
 	//Assumes all assets have resolved AssetIdentifiers already.
 	template <class AssetExportTaskT>
-	requires std::derived_from<AssetExportTaskT, AssetExportTask>
-		&& std::constructible_from<AssetExportTaskT, class Win32AppContext&, std::vector<AssetUtilDesc>, std::string, std::string, std::string, bool>
-	inline void exportAssetsBy(std::vector<AssetUtilDesc> assets,
-		class Win32AppContext& appContext, std::string extension, std::string extensionFilter,
+		requires std::derived_from<AssetExportTaskT, AssetExportTask>
+	&& std::constructible_from<AssetExportTaskT, class Win32AppContext&, std::vector<AssetUtilDesc>, std::string, std::string, std::string, bool>
+		inline void exportAssetsBy(std::vector<AssetUtilDesc> assets,
+			class Win32AppContext& appContext, std::string extension, std::string extensionFilter,
 			std::string taskName, bool stopOnError = false)
 	{
 		return exportAssetsBy(std::move(assets),
@@ -443,18 +452,18 @@ public:
 
 	//Assumes all assets have resolved AssetIdentifiers already.
 	template <class TaskGenerator>
-	requires std::invocable<const TaskGenerator&, std::vector<AssetUtilDesc>, std::vector<std::string>>
-		&& std::convertible_to<std::invoke_result_t<const TaskGenerator&, std::vector<AssetUtilDesc>, std::vector<std::string>>,
-			std::shared_ptr<AssetImportTask>>
-	UABE_Win32_API void importAssetsBy(std::vector<AssetUtilDesc> assets,
-		const TaskGenerator& taskGenerator, std::string extension, std::string extensionRegex, std::string extensionFilter);
+		requires std::invocable<const TaskGenerator&, std::vector<AssetUtilDesc>, std::vector<std::string>>
+	&& std::convertible_to<std::invoke_result_t<const TaskGenerator&, std::vector<AssetUtilDesc>, std::vector<std::string>>,
+		std::shared_ptr<AssetImportTask>>
+		UABE_Win32_API void importAssetsBy(std::vector<AssetUtilDesc> assets,
+			const TaskGenerator& taskGenerator, std::string extension, std::string extensionRegex, std::string extensionFilter);
 
 	//Assumes all assets have resolved AssetIdentifiers already.
 	template <class AssetImportTaskT>
-	requires std::derived_from<AssetImportTaskT, AssetImportTask>
-		&& std::constructible_from<AssetImportTaskT, class Win32AppContext&, std::vector<AssetUtilDesc>, std::vector<std::string>, std::string, bool>
-	inline void importAssetsBy(std::vector<AssetUtilDesc> assets,
-		class Win32AppContext& appContext, std::string extension, std::string extensionRegex, std::string extensionFilter,
+		requires std::derived_from<AssetImportTaskT, AssetImportTask>
+	&& std::constructible_from<AssetImportTaskT, class Win32AppContext&, std::vector<AssetUtilDesc>, std::vector<std::string>, std::string, bool>
+		inline void importAssetsBy(std::vector<AssetUtilDesc> assets,
+			class Win32AppContext& appContext, std::string extension, std::string extensionRegex, std::string extensionFilter,
 			std::string taskName, bool stopOnError = false)
 	{
 		return importAssetsBy(std::move(assets),

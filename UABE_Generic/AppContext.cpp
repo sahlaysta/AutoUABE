@@ -4,6 +4,16 @@
 #include <tuple>
 #include <filesystem>
 #include "../libStringConverter/convert.h"
+#include <fstream>
+#include <mutex>
+
+void AppContext::bulk_doneExportTexture() {
+
+}
+
+void AppContext::bulk_saveAll() {
+
+}
 
 AppContext::FileOpenTask::FileOpenTask(AppContext *pContext, std::shared_ptr<IAssetsReader> _pReader, bool readerIsModified, const std::string &path,
 	unsigned int parentFileID, unsigned int directoryEntryIdx,
@@ -22,7 +32,7 @@ const std::string &AppContext::FileOpenTask::getName()
 {
 	return name;
 }
-TaskResult AppContext::FileOpenTask::execute(TaskProgressManager &progressManager)
+TaskResult AppContext::FileOpenTask::bulk_originalExecute(TaskProgressManager& progressManager)
 {
 	//TODO (maybe) : make this task cancelable
 	this->pFileContext = nullptr;
@@ -86,6 +96,13 @@ TaskResult AppContext::FileOpenTask::execute(TaskProgressManager &progressManage
 	}
 	this->pReader.reset();
 	return -1;
+}
+
+TaskResult AppContext::FileOpenTask::execute(TaskProgressManager& progressManager)
+{
+	TaskResult ret = bulk_originalExecute(progressManager);
+
+	return ret;
 }
 
 AppContext::AppContext()

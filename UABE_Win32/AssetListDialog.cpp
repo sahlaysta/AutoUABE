@@ -11,14 +11,16 @@
 #include <WindowsX.h>
 #include "Win32PluginManager.h"
 #include "../libStringConverter/convert.h"
+#include <fstream>
 #include <format> //Note: For compiler support troubles, check out fmtlib https://github.com/fmtlib/fmt as a drop-in replacement.
+#include <filesystem>
 
 AssetModifyDialog::AssetModifyDialog()
 {}
 AssetModifyDialog::~AssetModifyDialog()
 {}
 
-AssetListDialog::FileEntryCache::FileEntryCache(FileEntryUIInfo *pUIInfo, Win32AppContext *pContext)
+AssetListDialog::FileEntryCache::FileEntryCache(FileEntryUIInfo* pUIInfo, Win32AppContext* pContext)
 	: pContext(pContext), pUIInfo(pUIInfo), nUsers(0), lastUseTime(0)
 {
 	pContext->getMainWindow().addDisposableCacheElement(pUIInfo, this);
@@ -52,7 +54,7 @@ bool AssetListDialog::FileEntryCache::isInUse()
 {
 	return nUsers > 0;
 }
-void AssetListDialog::FileEntryCache::onUpdateContainers(AssetsFileContextInfo *pFile)
+void AssetListDialog::FileEntryCache::onUpdateContainers(AssetsFileContextInfo* pFile)
 {
 	if (pFile == pUIInfo->getContextInfoPtr())
 	{
@@ -61,9 +63,9 @@ void AssetListDialog::FileEntryCache::onUpdateContainers(AssetsFileContextInfo *
 		assetCache.swap(tmp);
 	}
 }
-void AssetListDialog::FileEntryCache::onChangeAsset(AssetsFileContextInfo *pFile, pathid_t pathID, bool wasRemoved)
+void AssetListDialog::FileEntryCache::onChangeAsset(AssetsFileContextInfo* pFile, pathid_t pathID, bool wasRemoved)
 {
-	FileContextInfo *pContextInfo = pUIInfo->getContextInfoPtr();
+	FileContextInfo* pContextInfo = pUIInfo->getContextInfoPtr();
 	if (pContextInfo == nullptr)
 	{
 		//Any cached element is invalid
@@ -84,7 +86,7 @@ AssetListDialog::~AssetListDialog()
 {
 	pContext->getMainWindow().unregisterEventHandler(eventHandlerHandle);
 }
-AssetListDialog::AssetListDialog(class Win32AppContext *pContext, HWND hParentWnd)
+AssetListDialog::AssetListDialog(class Win32AppContext* pContext, HWND hParentWnd)
 	: pContext(pContext), hParentWnd(hParentWnd), hDialog(NULL),
 	cachedListEntryCount(0), cachedListEntryStartIdx(0), maxEntriesPerTick(100), ticksUntilCacheFreqUpdate(0)
 {
@@ -95,15 +97,130 @@ AssetListDialog::AssetListDialog(class Win32AppContext *pContext, HWND hParentWn
 	iFocusedItem = -1;
 	iLastTopItem = -1;
 	qpfrequency.QuadPart = 1;
+
+
+	pContext->bulk_ald = this;
 }
+
+void AssetListDialog::bulk_SelectAllAssets() {
+	for (size_t i = 0; i < listEntries.size(); i++) {
+		listEntries[i].isSelected = true;
+	}
+}
+
+void AssetListDialog::bulk_ExportAllAssets() {
+	for (size_t i = 0; i < listEntries.size(); i++) {
+		listEntries[i].isSelected = true;
+	}
+	std::vector<AssetUtilDesc> selection = getSelectedAssets();
+	exportAssetsBy<AssetExportTextDumpTask>(std::move(selection), *this->pContext, ".txt", "*.txt|Text files:", "Export text dump", false);
+}
+
+void AssetListDialog::bulk_ExportAllTexture2D() {
+	AssetInfo* pFirstEntry = nullptr;
+	cacheEntries(0, listEntries.size(), pFirstEntry);
+	bool foundtexture = false;
+	for (size_t i = 0; i < listEntries.size(); i++) {
+		std::string* typeName = getTypeName(listEntries[i].fileID, listEntries[i].pathID);
+		if (typeName && *typeName == "Texture2D") {
+			listEntries[i].isSelected = true;
+			foundtexture = true;
+		}
+		else {
+			listEntries[i].isSelected = false;
+		}
+	}
+
+	if (!foundtexture) {
+		pContext->bulk_niter++;
+		return;
+	}
+
+	std::vector<AssetUtilDesc> selection = getSelectedAssets();
+	const PluginMapping& plugins = this->pContext->getPlugins();
+	auto citer = plugins.options.cbegin();
+	std::shared_ptr<IOptionProvider> pCurProvider;
+	while (citer = plugins.getNextOptionProvider(citer, pCurProvider), pCurProvider != nullptr)
+	{
+		std::string optionName;
+		std::unique_ptr<IOptionRunner> pRunner;
+		if (auto* pAssetListProvider = dynamic_cast<IAssetListTabOptionProvider*>(pCurProvider.get()))
+		{
+			pRunner = pAssetListProvider->prepareForSelection(*this->pContext, *this, selection, optionName);
+		}
+		else if (auto* pAssetGenericProvider = dynamic_cast<IAssetOptionProviderGeneric*>(pCurProvider.get()))
+		{
+			pRunner = pAssetGenericProvider->prepareForSelection(*this->pContext, selection, optionName);
+		}
+		if (pRunner != nullptr)
+		{
+			if (optionName == "Export to .png") {
+				(*pRunner)();
+			}
+		}
+	}
+}
+
+void AssetListDialog::bulk_ImportAllTexture2D() {
+	AssetInfo* pFirstEntry = nullptr;
+	cacheEntries(0, listEntries.size(), pFirstEntry);
+	bool foundtexture = false;
+	for (size_t i = 0; i < listEntries.size(); i++) {
+		std::string* typeName = getTypeName(listEntries[i].fileID, listEntries[i].pathID);
+		if (typeName && *typeName == "Texture2D") {
+			listEntries[i].isSelected = true;
+			foundtexture = true;
+		}
+		else {
+			listEntries[i].isSelected = false;
+		}
+	}
+
+	if (!foundtexture) {
+		return;
+	}
+
+	std::vector<AssetUtilDesc> selection = getSelectedAssets();
+	const PluginMapping& plugins = this->pContext->getPlugins();
+	auto citer = plugins.options.cbegin();
+	std::shared_ptr<IOptionProvider> pCurProvider;
+	while (citer = plugins.getNextOptionProvider(citer, pCurProvider), pCurProvider != nullptr)
+	{
+		std::string optionName;
+		std::unique_ptr<IOptionRunner> pRunner;
+		if (auto* pAssetListProvider = dynamic_cast<IAssetListTabOptionProvider*>(pCurProvider.get()))
+		{
+			pRunner = pAssetListProvider->prepareForSelection(*this->pContext, *this, selection, optionName);
+		}
+		else if (auto* pAssetGenericProvider = dynamic_cast<IAssetOptionProviderGeneric*>(pCurProvider.get()))
+		{
+			pRunner = pAssetGenericProvider->prepareForSelection(*this->pContext, selection, optionName);
+		}
+		if (pRunner != nullptr)
+		{
+			if (optionName == "Edit") {
+				(*pRunner)();
+			}
+		}
+	}
+}
+
+void AssetListDialog::bulk_ImportAllAssets() {
+	for (size_t i = 0; i < listEntries.size(); i++) {
+		listEntries[i].isSelected = true;
+	}
+
+	importAssetsDump(this->getSelectedAssets());
+}
+
 EFileManipulateDialogType AssetListDialog::getType()
 {
 	return FileManipulateDialog_AssetList;
 }
-void AssetListDialog::addFileContext(const std::pair<FileEntryUIInfo*,uintptr_t> &fileContext)
+void AssetListDialog::addFileContext(const std::pair<FileEntryUIInfo*, uintptr_t>& fileContext)
 {
-	FileContextInfo *pContextInfo = fileContext.first->getContextInfoPtr();
-	if (AssetsFileContextInfo *pAssetsInfo = dynamic_cast<AssetsFileContextInfo*>(pContextInfo))
+	FileContextInfo* pContextInfo = fileContext.first->getContextInfoPtr();
+	if (AssetsFileContextInfo* pAssetsInfo = dynamic_cast<AssetsFileContextInfo*>(pContextInfo))
 	{
 		unsigned int fileID = pAssetsInfo->getFileID();
 		auto entryIt = fileEntries.find(fileID);
@@ -119,7 +236,7 @@ void AssetListDialog::addFileContext(const std::pair<FileEntryUIInfo*,uintptr_t>
 			}
 			else
 			{
-				FileEntryCache *pNewCache = new FileEntryCache(fileContext.first, pContext);
+				FileEntryCache* pNewCache = new FileEntryCache(fileContext.first, pContext);
 				pNewCache->nUsers++;
 				assert(pNewCache->nUsers >= 1);
 				fileEntries[fileID] = FileEntryCacheRef(pNewCache);
@@ -143,7 +260,7 @@ void AssetListDialog::addFileContext(const std::pair<FileEntryUIInfo*,uintptr_t>
 		}
 	}
 }
-void AssetListDialog::removeFileContext(FileEntryUIInfo *pEntryInfo)
+void AssetListDialog::removeFileContext(FileEntryUIInfo* pEntryInfo)
 {
 	//No need to update the sort order.
 	unsigned int fileID = 0;
@@ -186,7 +303,7 @@ void AssetListDialog::removeFileContext(FileEntryUIInfo *pEntryInfo)
 		size_t moveOffset = 0;
 		if (hAssetListView)
 			ListView_SetItemCount(hAssetListView, 0);
-			//ListView_DeleteAllItems(hAssetListView);
+		//ListView_DeleteAllItems(hAssetListView);
 		for (size_t i = 0; i < listEntries.size() - moveOffset; i++)
 		{
 			while ((i + moveOffset) < listEntries.size() && listEntries[i + moveOffset].fileID == fileID)
@@ -256,7 +373,7 @@ bool AssetListDialog::onCommand(WPARAM wParam, LPARAM lParam)
 			{
 				if (item.lParam != 0)
 				{
-					AssetModifyDialog *pModifyDlg = reinterpret_cast<AssetModifyDialog*>(item.lParam);
+					AssetModifyDialog* pModifyDlg = reinterpret_cast<AssetModifyDialog*>(item.lParam);
 					if (wmId == IDM_FILE_APPLY)
 					{
 						pModifyDlg->applyChanges();
@@ -280,19 +397,19 @@ void AssetListDialog::onHotkey(ULONG message, DWORD keyCode)
 	}
 }
 
-void AssetListDialog::onUpdateContainers(AssetsFileContextInfo *pFile)
+void AssetListDialog::onUpdateContainers(AssetsFileContextInfo* pFile)
 {
 	unsigned int fileID = pFile->getFileID();
 	auto entryIt = fileEntries.find(pFile->getFileID());
 	if (entryIt != fileEntries.end())
 	{
-		FileEntryCache &entryCache = *entryIt->second.get();
+		FileEntryCache& entryCache = *entryIt->second.get();
 		if (entryCache.assetCache.size() > 0 && entryCache.assetCache.size() <= cachedListEntryCount)
 			cachedListEntryCount -= entryCache.assetCache.size();
 		else
 		{
 			//The amount of discarded cache elements is unknown, since the FileEntryCache may have cleared itself already.
-			cachedListEntryCount = 0; 
+			cachedListEntryCount = 0;
 		}
 		if (hDialog)
 		{
@@ -381,7 +498,7 @@ void AssetListDialog::applyDeferredChanges()
 	this->listEntries = std::move(newListEntries);
 	if (hDialog)
 		ListView_SetItemCount(GetDlgItem(hDialog, IDC_ASSETLIST), (int)std::min<size_t>(listEntries.size(), INT_MAX));
-	if (entriesToSort.size() > 100) 
+	if (entriesToSort.size() > 100)
 	{
 		//Since inserting many items into a vector at random locations is slow (O(nlogn+n^2)),
 		// insert all at the end and then sort the whole vector if needed (O(n+nlogn)).
@@ -408,7 +525,7 @@ void AssetListDialog::applyDeferredChanges()
 	if (hDialog && iChangedFirst < INT_MAX)
 		ListView_RedrawItems(GetDlgItem(hDialog, IDC_ASSETLIST), iChangedFirst, (int)std::min<size_t>(listEntries.size(), INT_MAX));
 }
-void AssetListDialog::onChangeAsset(AssetsFileContextInfo *pFile, pathid_t pathID, bool wasRemoved)
+void AssetListDialog::onChangeAsset(AssetsFileContextInfo* pFile, pathid_t pathID, bool wasRemoved)
 {
 	//Called whenever a replacer was added, even if the dialog is hidden (as long as it has the file context).
 	unsigned int fileID = pFile->getFileID();
@@ -451,7 +568,7 @@ void AssetListDialog::onHide()
 		windowUpdateScheduled = false;
 		entryCachingScheduled = false;
 		selectionUpdateScheduled = false;
-		
+
 		HWND hTabsControl = GetDlgItem(this->hDialog, IDC_ASSETLISTMODIFYTABS);
 		int curTab = (int)SendMessage(hTabsControl, MC_MTM_GETCURSEL, 0, 0);
 		if (curTab != -1)
@@ -479,10 +596,10 @@ void AssetListDialog::onShow()
 	EnableMenuItem(pContext->getMainWindow().getMenu(), IDM_VIEW_ADDASSET, MF_ENABLED);
 	EnableMenuItem(pContext->getMainWindow().getMenu(), IDM_FILE_APPLY, MF_ENABLED);
 	EnableMenuItem(pContext->getMainWindow().getMenu(), IDM_VIEW_SEARCHBYNAME, MF_ENABLED);
-	EnableMenuItem(pContext->getMainWindow().getMenu(), IDM_VIEW_CONTINUESEARCH, 
+	EnableMenuItem(pContext->getMainWindow().getMenu(), IDM_VIEW_CONTINUESEARCH,
 		this->searchQuery.empty() ? MF_GRAYED : MF_ENABLED);
 	EnableMenuItem(pContext->getMainWindow().getMenu(), IDM_VIEW_GOTOASSET, MF_ENABLED);
-	
+
 	if (this->hDialog)
 	{
 		this->selectionUpdateScheduled = true;
@@ -491,13 +608,13 @@ void AssetListDialog::onShow()
 	//EnableMenuItem(pContext->getMainWindow().getMenu(), IDM_MODMAKER_CREATESTANDALONE, MF_ENABLED);
 	//EnableMenuItem(pContext->getMainWindow().getMenu(), IDM_MODMAKER_CREATEPACKAGE, MF_ENABLED);
 }
-bool AssetListDialog::hasUnappliedChanges(bool *applyable)
+bool AssetListDialog::hasUnappliedChanges(bool* applyable)
 {
 	bool ret = false;
 	//Only the modify dialogs can have unapplied changes; AssetListDialog doesn't store any relevant saveable state.
 	for (auto modifyDialogPtrIt = this->modifyDialogs.begin(); modifyDialogPtrIt != this->modifyDialogs.end(); ++modifyDialogPtrIt)
 	{
-		AssetModifyDialog *pDialog = modifyDialogPtrIt->get();
+		AssetModifyDialog* pDialog = modifyDialogPtrIt->get();
 		bool curApplyable = false;
 		if (pDialog && pDialog->hasUnappliedChanges(&curApplyable))
 		{
@@ -518,7 +635,7 @@ bool AssetListDialog::applyChanges()
 	bool ret = true;
 	for (auto modifyDialogPtrIt = this->modifyDialogs.begin(); modifyDialogPtrIt != this->modifyDialogs.end(); ++modifyDialogPtrIt)
 	{
-		AssetModifyDialog *pDialog = modifyDialogPtrIt->get();
+		AssetModifyDialog* pDialog = modifyDialogPtrIt->get();
 		if (pDialog && !pDialog->applyChanges())
 			ret = false; //Still apply changes of any other open dialog. Need to check whether this is good behavior, or if it could .
 	}
@@ -536,39 +653,39 @@ bool AssetListDialog::doesPreferNoAutoclose()
 
 struct SortPred_Base
 {
-	AssetListDialog *pDlg;
+	AssetListDialog* pDlg;
 	bool smallerThan; //ascending
-	inline SortPred_Base(AssetListDialog *pDlg, bool smallerThan) : pDlg(pDlg), smallerThan(smallerThan) {}
+	inline SortPred_Base(AssetListDialog* pDlg, bool smallerThan) : pDlg(pDlg), smallerThan(smallerThan) {}
 };
 struct SortPred_Name : SortPred_Base
 {
-	inline SortPred_Name(AssetListDialog *pDlg, bool smallerThan) : SortPred_Base(pDlg, smallerThan) {}
-	bool operator()(const AssetListDialog::ListEntry &a, const AssetListDialog::ListEntry &b) const
+	inline SortPred_Name(AssetListDialog* pDlg, bool smallerThan) : SortPred_Base(pDlg, smallerThan) {}
+	bool operator()(const AssetListDialog::ListEntry& a, const AssetListDialog::ListEntry& b) const
 	{
-		std::string *pNameA = pDlg->getName(a.fileID, a.pathID);
-		std::string *pNameB = pDlg->getName(b.fileID, b.pathID);
+		std::string* pNameA = pDlg->getName(a.fileID, a.pathID);
+		std::string* pNameB = pDlg->getName(b.fileID, b.pathID);
 		assert(pNameA && pNameB); //Should always be the case. 
 		return (smallerThan ? ((*pNameA) < (*pNameB)) : ((*pNameA) > (*pNameB)));
 	}
 };
 struct SortPred_ContainerName : SortPred_Base
 {
-	inline SortPred_ContainerName(AssetListDialog *pDlg, bool smallerThan) : SortPred_Base(pDlg, smallerThan) {}
-	bool operator()(const AssetListDialog::ListEntry &a, const AssetListDialog::ListEntry &b) const
+	inline SortPred_ContainerName(AssetListDialog* pDlg, bool smallerThan) : SortPred_Base(pDlg, smallerThan) {}
+	bool operator()(const AssetListDialog::ListEntry& a, const AssetListDialog::ListEntry& b) const
 	{
-		std::string *pNameA = pDlg->getContainerName(a.fileID, a.pathID);
-		std::string *pNameB = pDlg->getContainerName(b.fileID, b.pathID);
+		std::string* pNameA = pDlg->getContainerName(a.fileID, a.pathID);
+		std::string* pNameB = pDlg->getContainerName(b.fileID, b.pathID);
 		assert(pNameA && pNameB); //Should always be the case. 
 		return (smallerThan ? ((*pNameA) < (*pNameB)) : ((*pNameA) > (*pNameB)));
 	}
 };
 struct SortPred_TypeName : SortPred_Base
 {
-	inline SortPred_TypeName(AssetListDialog *pDlg, bool smallerThan) : SortPred_Base(pDlg, smallerThan) {}
-	bool operator()(const AssetListDialog::ListEntry &a, const AssetListDialog::ListEntry &b) const
+	inline SortPred_TypeName(AssetListDialog* pDlg, bool smallerThan) : SortPred_Base(pDlg, smallerThan) {}
+	bool operator()(const AssetListDialog::ListEntry& a, const AssetListDialog::ListEntry& b) const
 	{
-		std::string *pNameA = pDlg->getTypeName(a.fileID, a.pathID);
-		std::string *pNameB = pDlg->getTypeName(b.fileID, b.pathID);
+		std::string* pNameA = pDlg->getTypeName(a.fileID, a.pathID);
+		std::string* pNameB = pDlg->getTypeName(b.fileID, b.pathID);
 		assert(pNameA && pNameB); //Should always be the case. 
 		return (smallerThan ? ((*pNameA) < (*pNameB)) : ((*pNameA) > (*pNameB)));
 	}
@@ -577,7 +694,7 @@ struct SortPred_FileID
 {
 	bool smallerThan;
 	inline SortPred_FileID(bool smallerThan) : smallerThan(smallerThan) {}
-	bool operator()(const AssetListDialog::ListEntry &a, const AssetListDialog::ListEntry &b) const
+	bool operator()(const AssetListDialog::ListEntry& a, const AssetListDialog::ListEntry& b) const
 	{
 		return (smallerThan ? (a.fileID < b.fileID) : (a.fileID > b.fileID));
 	}
@@ -586,15 +703,15 @@ struct SortPred_PathID
 {
 	bool smallerThan;
 	inline SortPred_PathID(bool smallerThan) : smallerThan(smallerThan) {}
-	bool operator()(const AssetListDialog::ListEntry &a, const AssetListDialog::ListEntry &b) const
+	bool operator()(const AssetListDialog::ListEntry& a, const AssetListDialog::ListEntry& b) const
 	{
 		return (smallerThan ? ((int64_t)a.pathID < (int64_t)b.pathID) : ((int64_t)a.pathID > (int64_t)b.pathID));
 	}
 };
 struct SortPred_Size : SortPred_Base
 {
-	inline SortPred_Size(AssetListDialog *pDlg, bool smallerThan) : SortPred_Base(pDlg, smallerThan) {}
-	bool operator()(const AssetListDialog::ListEntry &a, const AssetListDialog::ListEntry &b) const
+	inline SortPred_Size(AssetListDialog* pDlg, bool smallerThan) : SortPred_Base(pDlg, smallerThan) {}
+	bool operator()(const AssetListDialog::ListEntry& a, const AssetListDialog::ListEntry& b) const
 	{
 		auto sizeA = pDlg->getSize(a.fileID, a.pathID);
 		auto sizeB = pDlg->getSize(b.fileID, b.pathID);
@@ -603,8 +720,8 @@ struct SortPred_Size : SortPred_Base
 };
 struct SortPred_Modified : SortPred_Base
 {
-	inline SortPred_Modified(AssetListDialog *pDlg, bool smallerThan) : SortPred_Base(pDlg, smallerThan) {}
-	bool operator()(const AssetListDialog::ListEntry &a, const AssetListDialog::ListEntry &b) const
+	inline SortPred_Modified(AssetListDialog* pDlg, bool smallerThan) : SortPred_Base(pDlg, smallerThan) {}
+	bool operator()(const AssetListDialog::ListEntry& a, const AssetListDialog::ListEntry& b) const
 	{
 		bool modA = pDlg->getIsModified(a.fileID, a.pathID);
 		bool modB = pDlg->getIsModified(b.fileID, b.pathID);
@@ -679,37 +796,37 @@ void AssetListDialog::listEntryInsertSorted(ListEntry newEntry, size_t targetIdx
 		auto targetIt = listEntries.begin() + targetIdx;
 		switch (iSortColumn)
 		{
-			case 0: //Name
-				newEntryIndex = std::distance(listEntries.begin(), 
-					upper_bound_or_target(listEntries.begin(), listEntries.end(), targetIt, newEntry, SortPred_Name(this, sortOrderAscending)));
-				break;
-			case 1: //Container
-				newEntryIndex = std::distance(listEntries.begin(), 
-					upper_bound_or_target(listEntries.begin(), listEntries.end(), targetIt, newEntry, SortPred_ContainerName(this, sortOrderAscending)));
-				break;
-			case 2: //Type
-				newEntryIndex = std::distance(listEntries.begin(), 
-					upper_bound_or_target(listEntries.begin(), listEntries.end(), targetIt, newEntry, SortPred_TypeName(this, sortOrderAscending)));
-				break;
-			case 3: //File ID
-				newEntryIndex = std::distance(listEntries.begin(), 
-					upper_bound_or_target(listEntries.begin(), listEntries.end(), targetIt, newEntry, SortPred_FileID(sortOrderAscending)));
-				break;
-			case 4: //Path ID
-				newEntryIndex = std::distance(listEntries.begin(), 
-					upper_bound_or_target(listEntries.begin(), listEntries.end(), targetIt, newEntry, SortPred_PathID(sortOrderAscending)));
-				break;
-			case 5: //Size (Bytes)
-				newEntryIndex = std::distance(listEntries.begin(), 
-					upper_bound_or_target(listEntries.begin(), listEntries.end(), targetIt, newEntry, SortPred_Size(this, sortOrderAscending)));
-				break;
-			case 6: //Modified
-				newEntryIndex = std::distance(listEntries.begin(), 
-					upper_bound_or_target(listEntries.begin(), listEntries.end(), targetIt, newEntry, SortPred_Modified(this, sortOrderAscending)));
-				break;
-			default:
-				sorted = false;
-				break;
+		case 0: //Name
+			newEntryIndex = std::distance(listEntries.begin(),
+				upper_bound_or_target(listEntries.begin(), listEntries.end(), targetIt, newEntry, SortPred_Name(this, sortOrderAscending)));
+			break;
+		case 1: //Container
+			newEntryIndex = std::distance(listEntries.begin(),
+				upper_bound_or_target(listEntries.begin(), listEntries.end(), targetIt, newEntry, SortPred_ContainerName(this, sortOrderAscending)));
+			break;
+		case 2: //Type
+			newEntryIndex = std::distance(listEntries.begin(),
+				upper_bound_or_target(listEntries.begin(), listEntries.end(), targetIt, newEntry, SortPred_TypeName(this, sortOrderAscending)));
+			break;
+		case 3: //File ID
+			newEntryIndex = std::distance(listEntries.begin(),
+				upper_bound_or_target(listEntries.begin(), listEntries.end(), targetIt, newEntry, SortPred_FileID(sortOrderAscending)));
+			break;
+		case 4: //Path ID
+			newEntryIndex = std::distance(listEntries.begin(),
+				upper_bound_or_target(listEntries.begin(), listEntries.end(), targetIt, newEntry, SortPred_PathID(sortOrderAscending)));
+			break;
+		case 5: //Size (Bytes)
+			newEntryIndex = std::distance(listEntries.begin(),
+				upper_bound_or_target(listEntries.begin(), listEntries.end(), targetIt, newEntry, SortPred_Size(this, sortOrderAscending)));
+			break;
+		case 6: //Modified
+			newEntryIndex = std::distance(listEntries.begin(),
+				upper_bound_or_target(listEntries.begin(), listEntries.end(), targetIt, newEntry, SortPred_Modified(this, sortOrderAscending)));
+			break;
+		default:
+			sorted = false;
+			break;
 		}
 	}
 	listEntries.insert(listEntries.begin() + newEntryIndex, std::move(newEntry));
@@ -758,30 +875,30 @@ void AssetListDialog::resort()
 	bool noChanges = false;
 	switch (iSortColumn)
 	{
-		case 0: //Name
-			std::stable_sort(listEntries.begin(), listEntries.end(), SortPred_Name(this, sortOrderAscending));
-			break;
-		case 1: //Container
-			std::stable_sort(listEntries.begin(), listEntries.end(), SortPred_ContainerName(this, sortOrderAscending));
-			break;
-		case 2: //Type
-			std::stable_sort(listEntries.begin(), listEntries.end(), SortPred_TypeName(this, sortOrderAscending));
-			break;
-		case 3: //File ID
-			std::stable_sort(listEntries.begin(), listEntries.end(), SortPred_FileID(sortOrderAscending));
-			break;
-		case 4: //Path ID
-			std::stable_sort(listEntries.begin(), listEntries.end(), SortPred_PathID(sortOrderAscending));
-			break;
-		case 5: //Size (Bytes)
-			std::stable_sort(listEntries.begin(), listEntries.end(), SortPred_Size(this, sortOrderAscending));
-			break;
-		case 6: //Modified
-			std::stable_sort(listEntries.begin(), listEntries.end(), SortPred_Modified(this, sortOrderAscending));
-			break;
-		default:
-			noChanges = true;
-			break;
+	case 0: //Name
+		std::stable_sort(listEntries.begin(), listEntries.end(), SortPred_Name(this, sortOrderAscending));
+		break;
+	case 1: //Container
+		std::stable_sort(listEntries.begin(), listEntries.end(), SortPred_ContainerName(this, sortOrderAscending));
+		break;
+	case 2: //Type
+		std::stable_sort(listEntries.begin(), listEntries.end(), SortPred_TypeName(this, sortOrderAscending));
+		break;
+	case 3: //File ID
+		std::stable_sort(listEntries.begin(), listEntries.end(), SortPred_FileID(sortOrderAscending));
+		break;
+	case 4: //Path ID
+		std::stable_sort(listEntries.begin(), listEntries.end(), SortPred_PathID(sortOrderAscending));
+		break;
+	case 5: //Size (Bytes)
+		std::stable_sort(listEntries.begin(), listEntries.end(), SortPred_Size(this, sortOrderAscending));
+		break;
+	case 6: //Modified
+		std::stable_sort(listEntries.begin(), listEntries.end(), SortPred_Modified(this, sortOrderAscending));
+		break;
+	default:
+		noChanges = true;
+		break;
 	}
 	if (pProgressIndicator != nullptr)
 	{
@@ -822,8 +939,8 @@ void AssetListDialog::resort()
 	sorted = true;
 }
 
-void AssetListDialog::getContainerInfo(AssetsFileContextInfo *pContextInfo, pathid_t pathID,
-		OUT std::string &baseName, OUT std::string &containerListName)
+void AssetListDialog::getContainerInfo(AssetsFileContextInfo* pContextInfo, pathid_t pathID,
+	OUT std::string& baseName, OUT std::string& containerListName)
 {
 	unsigned int fileID = pContextInfo->getFileID();
 	bool hasContainerBase = false;
@@ -833,7 +950,7 @@ void AssetListDialog::getContainerInfo(AssetsFileContextInfo *pContextInfo, path
 	containerListName.clear();
 	std::string exampleContainerName;
 	{
-		AssetContainerList *pMainContainersList = pContextInfo->tryLockContainersRead();
+		AssetContainerList* pMainContainersList = pContextInfo->tryLockContainersRead();
 		if (pMainContainersList)
 		{
 			std::vector<const ContainerEntry*> mainContainers = pMainContainersList->getContainers(0, pathID);
@@ -860,15 +977,15 @@ void AssetListDialog::getContainerInfo(AssetsFileContextInfo *pContextInfo, path
 			pDepContextInfo->getFileContext() &&
 			pDepContextInfo->getFileContext()->getType() == FileContext_Assets)
 		{
-			AssetsFileContextInfo *pDepContextInfo_Assets = static_cast<AssetsFileContextInfo*>(pDepContextInfo.get());
+			AssetsFileContextInfo* pDepContextInfo_Assets = static_cast<AssetsFileContextInfo*>(pDepContextInfo.get());
 			const std::vector<unsigned int> referenceFileIDs = pDepContextInfo_Assets->getReferences();
 			auto ownIDIt = std::find(referenceFileIDs.begin(), referenceFileIDs.end(), fileID);
 			if (ownIDIt != referenceFileIDs.end())
 			{
 				size_t relFileID = std::distance(referenceFileIDs.begin(), ownIDIt) + 1;
 				assert(relFileID < UINT_MAX);
-				
-				AssetContainerList *pDepContainersList = pDepContextInfo_Assets->tryLockContainersRead();
+
+				AssetContainerList* pDepContainersList = pDepContextInfo_Assets->tryLockContainersRead();
 				if (pDepContainersList)
 				{
 					std::vector<const ContainerEntry*> mainContainers = pDepContainersList->getContainers((unsigned int)relFileID, pathID);
@@ -918,8 +1035,8 @@ void AssetListDialog::getContainerInfo(AssetsFileContextInfo *pContextInfo, path
 	if (nameExt[0] != 0)
 		containerListName += nameExt;
 }
-bool AssetListDialog::TryRetrieveAssetNameField(AssetsFileContextInfo *pContextInfo, AssetIdentifier &identifier, std::string &nameOut,
-	std::unordered_map<NameTypeCacheKey, NameTypeCacheValue> &nameTypesCache)
+bool AssetListDialog::TryRetrieveAssetNameField(AssetsFileContextInfo* pContextInfo, AssetIdentifier& identifier, std::string& nameOut,
+	std::unordered_map<NameTypeCacheKey, NameTypeCacheValue>& nameTypesCache)
 {
 	if (identifier.pAssetInfo && !identifier.pReplacer)
 	{
@@ -930,7 +1047,7 @@ bool AssetListDialog::TryRetrieveAssetNameField(AssetsFileContextInfo *pContextI
 	}
 	bool ret = false;
 	{
-		NameTypeCacheValue *pNameTypeValue = nullptr;
+		NameTypeCacheValue* pNameTypeValue = nullptr;
 		NameTypeCacheKey key(pContextInfo->getFileID(), identifier.getClassID(), identifier.getMonoScriptID());
 		auto typeFileCacheIt = nameTypesCache.find(key);
 		if (typeFileCacheIt != nameTypesCache.end())
@@ -942,7 +1059,7 @@ bool AssetListDialog::TryRetrieveAssetNameField(AssetsFileContextInfo *pContextI
 			newValue.nameChildIdx = 0;
 			if (pContextInfo->MakeTemplateField(&newValue.templateBase, *this->pContext, identifier.getClassID(), identifier.getMonoScriptID(), &identifier))
 			{
-				AssetTypeTemplateField &templateBase = newValue.templateBase;
+				AssetTypeTemplateField& templateBase = newValue.templateBase;
 				for (DWORD i = 0; i < templateBase.children.size(); i++)
 				{
 					if (templateBase.children[i].name == "m_Name"
@@ -961,8 +1078,8 @@ bool AssetListDialog::TryRetrieveAssetNameField(AssetsFileContextInfo *pContextI
 			IAssetsReader_ptr pReader = identifier.makeReader();
 			if (pReader)
 			{
-				AssetTypeTemplateField *pTemplateBase = &pNameTypeValue->templateBase;
-				AssetTypeValueField *pBase;
+				AssetTypeTemplateField* pTemplateBase = &pNameTypeValue->templateBase;
+				AssetTypeValueField* pBase;
 
 				uint32_t origChildCount = (uint32_t)pNameTypeValue->templateBase.children.size();
 				std::vector<AssetTypeTemplateField> childrenTmp = std::move(pNameTypeValue->templateBase.children);
@@ -973,7 +1090,7 @@ bool AssetListDialog::TryRetrieveAssetNameField(AssetsFileContextInfo *pContextI
 				pBase = instance.GetBaseField();
 				if (pBase)
 				{
-					AssetTypeValueField *pNameField = pBase->Get("m_Name");
+					AssetTypeValueField* pNameField = pBase->Get("m_Name");
 					if (!pNameField->IsDummy() && pNameField->GetValue())
 					{
 						nameOut.assign(pNameField->GetValue()->AsString());
@@ -986,7 +1103,7 @@ bool AssetListDialog::TryRetrieveAssetNameField(AssetsFileContextInfo *pContextI
 	}
 	return ret;
 }
-size_t AssetListDialog::cacheEntries(size_t start, size_t end, AssetInfo *&pFirstEntry, size_t nMax, size_t *maxVisitedIndex)
+size_t AssetListDialog::cacheEntries(size_t start, size_t end, AssetInfo*& pFirstEntry, size_t nMax, size_t* maxVisitedIndex)
 {
 	applyDeferredChanges();
 	std::unordered_map<NameTypeCacheKey, NameTypeCacheValue> nameTypesCache;
@@ -1008,9 +1125,9 @@ size_t AssetListDialog::cacheEntries(size_t start, size_t end, AssetInfo *&pFirs
 				auto cacheEntryIt = fileEntryIt->second->assetCache.find(pathID);
 				if (cacheEntryIt == fileEntryIt->second->assetCache.end())
 				{
-					FileEntryUIInfo *pUIInfo = fileEntryIt->second->pUIInfo;
-					AssetsFileContextInfo *pContextInfo = static_cast<AssetsFileContextInfo*>(pUIInfo->getContextInfoPtr());
-					AssetIdentifier identifier(std::static_pointer_cast<AssetsFileContextInfo,FileContextInfo>(pUIInfo->pContextInfo), pathID);
+					FileEntryUIInfo* pUIInfo = fileEntryIt->second->pUIInfo;
+					AssetsFileContextInfo* pContextInfo = static_cast<AssetsFileContextInfo*>(pUIInfo->getContextInfoPtr());
+					AssetIdentifier identifier(std::static_pointer_cast<AssetsFileContextInfo, FileContextInfo>(pUIInfo->pContextInfo), pathID);
 					if (identifier.resolve(*this->pContext))
 					{
 						AssetInfo info;
@@ -1029,7 +1146,7 @@ size_t AssetListDialog::cacheEntries(size_t start, size_t end, AssetInfo *&pFirs
 							info.typeName.assign(sprntTmp);
 						}
 						auto newCacheEntryIt = fileEntryIt->second->assetCache.insert(
-							fileEntryIt->second->assetCache.begin(), 
+							fileEntryIt->second->assetCache.begin(),
 							std::make_pair(pathID, std::move(info)));
 						if (!pFirstEntry)
 							pFirstEntry = &newCacheEntryIt->second;
@@ -1045,7 +1162,7 @@ size_t AssetListDialog::cacheEntries(size_t start, size_t end, AssetInfo *&pFirs
 	}
 	return newCachedEntries;
 }
-void AssetListDialog::getEntryText(int iItem, int iSubItem, AssetInfo &entry, OUT std::unique_ptr<TCHAR[]> &newTextBuf)
+void AssetListDialog::getEntryText(int iItem, int iSubItem, AssetInfo& entry, OUT std::unique_ptr<TCHAR[]>& newTextBuf)
 {
 	newTextBuf.reset();
 	TCHAR sprntTmp[64];
@@ -1053,76 +1170,76 @@ void AssetListDialog::getEntryText(int iItem, int iSubItem, AssetInfo &entry, OU
 	newTextBuf = nullptr;
 	switch (iSubItem)
 	{
-		case 0: //Name
+	case 0: //Name
+	{
+		if (entry.name.empty())
+			sprntSize = _stprintf_s(sprntTmp, TEXT("%s"), TEXT("Unnamed asset"));
+		else
+		{
+			size_t nameLenT;
+			TCHAR* pNameT = _MultiByteToTCHAR(entry.name.c_str(), nameLenT);
+			if (pNameT)
 			{
-				if (entry.name.empty())
-					sprntSize = _stprintf_s(sprntTmp, TEXT("%s"), TEXT("Unnamed asset"));
-				else
-				{
-					size_t nameLenT;
-					TCHAR *pNameT = _MultiByteToTCHAR(entry.name.c_str(), nameLenT);
-					if (pNameT)
-					{
-						newTextBuf.reset(new TCHAR[nameLenT + 1]);
-						memcpy(newTextBuf.get(), pNameT, (nameLenT + 1) * sizeof(TCHAR));
-						_FreeTCHAR(pNameT);
-					}
-				}
+				newTextBuf.reset(new TCHAR[nameLenT + 1]);
+				memcpy(newTextBuf.get(), pNameT, (nameLenT + 1) * sizeof(TCHAR));
+				_FreeTCHAR(pNameT);
 			}
-			break;
-		case 1: //Container
-			{
-				size_t nameLenT;
-				TCHAR *pNameT = _MultiByteToTCHAR(entry.containerName.c_str(), nameLenT);
-				if (pNameT)
-				{
-					newTextBuf.reset(new TCHAR[nameLenT + 1]);
-					memcpy(newTextBuf.get(), pNameT, (nameLenT + 1) * sizeof(TCHAR));
-					_FreeTCHAR(pNameT);
-				}
-			}
-			break;
-		case 2: //Type
-			{
-				size_t nameLenT;
-				TCHAR *pNameT = _MultiByteToTCHAR(entry.typeName.c_str(), nameLenT);
-				if (pNameT)
-				{
-					newTextBuf.reset(new TCHAR[nameLenT + 1]);
-					memcpy(newTextBuf.get(), pNameT, (nameLenT + 1) * sizeof(TCHAR));
-					_FreeTCHAR(pNameT);
-				}
-			}
-			break;
-		case 128: //Type (plus Hex typeID)
-			{
-				size_t nameLenT;
-				TCHAR *pNameT = _MultiByteToTCHAR(entry.typeName.c_str(), nameLenT);
-				if (pNameT)
-				{
-					int curSprntSize = _stprintf_s(sprntTmp, TEXT(" (0x%08X)"), entry.typeID);
-					if (curSprntSize < 0) curSprntSize = 0;
-					newTextBuf.reset(new TCHAR[nameLenT + curSprntSize + 1]);
-					memcpy(newTextBuf.get(), pNameT, (nameLenT + 1) * sizeof(TCHAR));
-					memcpy(newTextBuf.get() + nameLenT, sprntTmp, (curSprntSize + 1) * sizeof(TCHAR));
-					_FreeTCHAR(pNameT);
-				}
-			}
-			break;
-		case 3: //File ID
-			sprntSize = _stprintf_s(sprntTmp, TEXT("%u"), this->listEntries[iItem].fileID);
-			break;
-		case 4: //Path ID
-			sprntSize = _stprintf_s(sprntTmp, TEXT("%lld"), (int64_t)this->listEntries[iItem].pathID);
-			break;
-		case 5: //Size (Bytes)
-			sprntSize = _stprintf_s(sprntTmp, TEXT("%llu"), entry.size);
-			break;
-		case 6: //Modified
-			sprntTmp[0] = (entry.isModified ? TEXT('*') : 0);
-			sprntTmp[1] = 0;
-			sprntSize = (entry.isModified ? 1 : 0);
-			break;
+		}
+	}
+	break;
+	case 1: //Container
+	{
+		size_t nameLenT;
+		TCHAR* pNameT = _MultiByteToTCHAR(entry.containerName.c_str(), nameLenT);
+		if (pNameT)
+		{
+			newTextBuf.reset(new TCHAR[nameLenT + 1]);
+			memcpy(newTextBuf.get(), pNameT, (nameLenT + 1) * sizeof(TCHAR));
+			_FreeTCHAR(pNameT);
+		}
+	}
+	break;
+	case 2: //Type
+	{
+		size_t nameLenT;
+		TCHAR* pNameT = _MultiByteToTCHAR(entry.typeName.c_str(), nameLenT);
+		if (pNameT)
+		{
+			newTextBuf.reset(new TCHAR[nameLenT + 1]);
+			memcpy(newTextBuf.get(), pNameT, (nameLenT + 1) * sizeof(TCHAR));
+			_FreeTCHAR(pNameT);
+		}
+	}
+	break;
+	case 128: //Type (plus Hex typeID)
+	{
+		size_t nameLenT;
+		TCHAR* pNameT = _MultiByteToTCHAR(entry.typeName.c_str(), nameLenT);
+		if (pNameT)
+		{
+			int curSprntSize = _stprintf_s(sprntTmp, TEXT(" (0x%08X)"), entry.typeID);
+			if (curSprntSize < 0) curSprntSize = 0;
+			newTextBuf.reset(new TCHAR[nameLenT + curSprntSize + 1]);
+			memcpy(newTextBuf.get(), pNameT, (nameLenT + 1) * sizeof(TCHAR));
+			memcpy(newTextBuf.get() + nameLenT, sprntTmp, (curSprntSize + 1) * sizeof(TCHAR));
+			_FreeTCHAR(pNameT);
+		}
+	}
+	break;
+	case 3: //File ID
+		sprntSize = _stprintf_s(sprntTmp, TEXT("%u"), this->listEntries[iItem].fileID);
+		break;
+	case 4: //Path ID
+		sprntSize = _stprintf_s(sprntTmp, TEXT("%lld"), (int64_t)this->listEntries[iItem].pathID);
+		break;
+	case 5: //Size (Bytes)
+		sprntSize = _stprintf_s(sprntTmp, TEXT("%llu"), entry.size);
+		break;
+	case 6: //Modified
+		sprntTmp[0] = (entry.isModified ? TEXT('*') : 0);
+		sprntTmp[1] = 0;
+		sprntSize = (entry.isModified ? 1 : 0);
+		break;
 	}
 	if (sprntSize > 0)
 	{
@@ -1167,7 +1284,7 @@ void AssetListDialog::updateSelectionDesc()
 			nSelections = 0;
 		if (nSelections == 1)
 		{
-			AssetInfo *pEntry = nullptr;
+			AssetInfo* pEntry = nullptr;
 			this->cacheEntry(lastSelection, pEntry);
 			if (pEntry == nullptr)
 				nSelections = 0;
@@ -1230,11 +1347,11 @@ void AssetListDialog::requestRemoveSelectedAssets()
 	}
 	if (selections.size() > 0 &&
 		MessageBox(
-			hDialog, 
-			TEXT("Are you sure you want to remove the selected asset(s)?\nThis will break any reference to the selection."), 
-			TEXT("Warning"), 
+			hDialog,
+			TEXT("Are you sure you want to remove the selected asset(s)?\nThis will break any reference to the selection."),
+			TEXT("Warning"),
 			MB_YESNO)
-			== IDYES)
+		== IDYES)
 	{
 		auto pProgressIndicator = std::make_shared<CProgressIndicator>(this->pContext->getMainWindow().getHInstance());
 		if (pProgressIndicator->Start(this->hDialog, pProgressIndicator, 2000))
@@ -1262,7 +1379,7 @@ void AssetListDialog::requestRemoveSelectedAssets()
 			FileContextInfo_ptr pContextInfo = this->pContext->getContextInfo(fileID);
 			if (pContextInfo->getFileContext() != nullptr && pContextInfo->getFileContext()->getType() == FileContext_Assets)
 			{
-				AssetsFileContextInfo *pAssetsInfo = reinterpret_cast<AssetsFileContextInfo*>(pContextInfo.get());
+				AssetsFileContextInfo* pAssetsInfo = reinterpret_cast<AssetsFileContextInfo*>(pContextInfo.get());
 				AssetIdentifier identifier(std::shared_ptr<AssetsFileContextInfo>(pContextInfo, pAssetsInfo), pathID);
 				if (identifier.resolve(*this->pContext))
 					pAssetsInfo->addReplacer(std::shared_ptr<AssetsEntryReplacer>(
@@ -1281,7 +1398,7 @@ void AssetListDialog::requestRemoveSelectedAssets()
 	}
 }
 
-inline void doMoveWindow(HDWP &deferCtx, bool &retry, HWND hWnd, int x, int y, int w, int h)
+inline void doMoveWindow(HDWP& deferCtx, bool& retry, HWND hWnd, int x, int y, int w, int h)
 {
 	if (deferCtx)
 	{
@@ -1310,15 +1427,15 @@ static void onResize(HWND hDlg, HWND hActiveTabWnd, bool defer = true)
 			ShowWindow(hActiveTabWnd, SW_SHOW);
 			showAssetList = false;
 		}
-		ShowWindow(GetDlgItem(hDlg, IDC_ASSETSSTATIC),        showAssetList ? SW_SHOW : SW_HIDE);
-		ShowWindow(GetDlgItem(hDlg, IDC_ASSETLIST),           showAssetList ? SW_SHOW : SW_HIDE);
-		ShowWindow(GetDlgItem(hDlg, IDC_VIEWDATA),            showAssetList ? SW_SHOW : SW_HIDE);
-		ShowWindow(GetDlgItem(hDlg, IDC_EXPORTRAW),           showAssetList ? SW_SHOW : SW_HIDE);
-		ShowWindow(GetDlgItem(hDlg, IDC_DUMPDATA),            showAssetList ? SW_SHOW : SW_HIDE);
-		ShowWindow(GetDlgItem(hDlg, IDC_PLUGINS),             showAssetList ? SW_SHOW : SW_HIDE);
-		ShowWindow(GetDlgItem(hDlg, IDC_IMPORTRAW),           showAssetList ? SW_SHOW : SW_HIDE);
-		ShowWindow(GetDlgItem(hDlg, IDC_IMPORTDUMP),          showAssetList ? SW_SHOW : SW_HIDE);
-		ShowWindow(GetDlgItem(hDlg, IDC_REMOVEASSET),         showAssetList ? SW_SHOW : SW_HIDE);
+		ShowWindow(GetDlgItem(hDlg, IDC_ASSETSSTATIC), showAssetList ? SW_SHOW : SW_HIDE);
+		ShowWindow(GetDlgItem(hDlg, IDC_ASSETLIST), showAssetList ? SW_SHOW : SW_HIDE);
+		ShowWindow(GetDlgItem(hDlg, IDC_VIEWDATA), showAssetList ? SW_SHOW : SW_HIDE);
+		ShowWindow(GetDlgItem(hDlg, IDC_EXPORTRAW), showAssetList ? SW_SHOW : SW_HIDE);
+		ShowWindow(GetDlgItem(hDlg, IDC_DUMPDATA), showAssetList ? SW_SHOW : SW_HIDE);
+		ShowWindow(GetDlgItem(hDlg, IDC_PLUGINS), showAssetList ? SW_SHOW : SW_HIDE);
+		ShowWindow(GetDlgItem(hDlg, IDC_IMPORTRAW), showAssetList ? SW_SHOW : SW_HIDE);
+		ShowWindow(GetDlgItem(hDlg, IDC_IMPORTDUMP), showAssetList ? SW_SHOW : SW_HIDE);
+		ShowWindow(GetDlgItem(hDlg, IDC_REMOVEASSET), showAssetList ? SW_SHOW : SW_HIDE);
 		if (!showAssetList)
 		{
 			ShowWindow(GetDlgItem(hDlg, IDC_NAMESTATIC), SW_HIDE);
@@ -1343,34 +1460,34 @@ static void onResize(HWND hDlg, HWND hActiveTabWnd, bool defer = true)
 
 	RECT client = {};
 	GetClientRect(hDlg, &client);
-	LONG clientWidth = client.right-client.left;
-	LONG clientHeight = client.bottom-client.top;
+	LONG clientWidth = client.right - client.left;
+	LONG clientHeight = client.bottom - client.top;
 	LONG rightPanelSize = std::min<LONG>(200, (clientWidth / 3) - 56);
 	LONG rightPanelStart = clientWidth - (rightPanelSize + 16);
 	LONG leftPanelStart = 19;
 	LONG leftPanelSize = rightPanelStart - 7 - leftPanelStart;
 	//LONG rightPanelSize = std::min<LONG>(200, clientWidth - ((2*clientWidth / 3) + 40));
-	doMoveWindow(deferCtx, retry, GetDlgItem(hDlg, IDC_ASSETLISTMODIFYTABS), 0, 0,  clientWidth, 25);
+	doMoveWindow(deferCtx, retry, GetDlgItem(hDlg, IDC_ASSETLISTMODIFYTABS), 0, 0, clientWidth, 25);
 	if (hActiveTabWnd != NULL)
 		doMoveWindow(deferCtx, retry, hActiveTabWnd, leftPanelStart, tabY, rightPanelStart + rightPanelSize - leftPanelStart, clientHeight - tabY);
-	doMoveWindow(deferCtx, retry, GetDlgItem(hDlg, IDC_ASSETSSTATIC),        leftPanelStart + 2, tabY + 0,   leftPanelSize - 2, 15);
-	doMoveWindow(deferCtx, retry, GetDlgItem(hDlg, IDC_ASSETLIST),           leftPanelStart,     tabY + 20,  leftPanelSize,     clientHeight - tabY - 20 - 7);
-	doMoveWindow(deferCtx, retry, GetDlgItem(hDlg, IDC_NUMSELSTATIC),        rightPanelStart,    tabY + 20,  rightPanelSize,    15);
-	doMoveWindow(deferCtx, retry, GetDlgItem(hDlg, IDC_NAMESTATIC),          rightPanelStart,    tabY + 20,  50, 15);
-	doMoveWindow(deferCtx, retry, GetDlgItem(hDlg, IDC_EDITASSETNAME),       rightPanelStart,    tabY + 35,  rightPanelSize,    20);
-	doMoveWindow(deferCtx, retry, GetDlgItem(hDlg, IDC_PATHIDSTATIC),        rightPanelStart,    tabY + 59,  50, 15);
-	doMoveWindow(deferCtx, retry, GetDlgItem(hDlg, IDC_EDITASSETPATHID),     rightPanelStart,    tabY + 74,  rightPanelSize,    20);
-	doMoveWindow(deferCtx, retry, GetDlgItem(hDlg, IDC_FILEIDSTATIC),        rightPanelStart,    tabY + 98,  50, 15);
-	doMoveWindow(deferCtx, retry, GetDlgItem(hDlg, IDC_EDITASSETFILEID),     rightPanelStart,    tabY + 113, rightPanelSize,    20);
-	doMoveWindow(deferCtx, retry, GetDlgItem(hDlg, IDC_TYPESTATIC),          rightPanelStart,    tabY + 137, 50, 15);
-	doMoveWindow(deferCtx, retry, GetDlgItem(hDlg, IDC_EDITASSETTYPE),       rightPanelStart,    tabY + 152, rightPanelSize,    20);
-	doMoveWindow(deferCtx, retry, GetDlgItem(hDlg, IDC_VIEWDATA),            rightPanelStart,    tabY + 191, rightPanelSize,    25);
-	doMoveWindow(deferCtx, retry, GetDlgItem(hDlg, IDC_EXPORTRAW),           rightPanelStart,    tabY + 235, rightPanelSize,    25);
-	doMoveWindow(deferCtx, retry, GetDlgItem(hDlg, IDC_DUMPDATA),            rightPanelStart,    tabY + 279, rightPanelSize,    25);
-	doMoveWindow(deferCtx, retry, GetDlgItem(hDlg, IDC_PLUGINS),             rightPanelStart,    tabY + 323, rightPanelSize,    25);
-	doMoveWindow(deferCtx, retry, GetDlgItem(hDlg, IDC_IMPORTRAW),           rightPanelStart,    tabY + 367, rightPanelSize,    25);
-	doMoveWindow(deferCtx, retry, GetDlgItem(hDlg, IDC_IMPORTDUMP),          rightPanelStart,    tabY + 411, rightPanelSize,    25);
-	doMoveWindow(deferCtx, retry, GetDlgItem(hDlg, IDC_REMOVEASSET),         rightPanelStart,    tabY + 460, rightPanelSize,    25);
+	doMoveWindow(deferCtx, retry, GetDlgItem(hDlg, IDC_ASSETSSTATIC), leftPanelStart + 2, tabY + 0, leftPanelSize - 2, 15);
+	doMoveWindow(deferCtx, retry, GetDlgItem(hDlg, IDC_ASSETLIST), leftPanelStart, tabY + 20, leftPanelSize, clientHeight - tabY - 20 - 7);
+	doMoveWindow(deferCtx, retry, GetDlgItem(hDlg, IDC_NUMSELSTATIC), rightPanelStart, tabY + 20, rightPanelSize, 15);
+	doMoveWindow(deferCtx, retry, GetDlgItem(hDlg, IDC_NAMESTATIC), rightPanelStart, tabY + 20, 50, 15);
+	doMoveWindow(deferCtx, retry, GetDlgItem(hDlg, IDC_EDITASSETNAME), rightPanelStart, tabY + 35, rightPanelSize, 20);
+	doMoveWindow(deferCtx, retry, GetDlgItem(hDlg, IDC_PATHIDSTATIC), rightPanelStart, tabY + 59, 50, 15);
+	doMoveWindow(deferCtx, retry, GetDlgItem(hDlg, IDC_EDITASSETPATHID), rightPanelStart, tabY + 74, rightPanelSize, 20);
+	doMoveWindow(deferCtx, retry, GetDlgItem(hDlg, IDC_FILEIDSTATIC), rightPanelStart, tabY + 98, 50, 15);
+	doMoveWindow(deferCtx, retry, GetDlgItem(hDlg, IDC_EDITASSETFILEID), rightPanelStart, tabY + 113, rightPanelSize, 20);
+	doMoveWindow(deferCtx, retry, GetDlgItem(hDlg, IDC_TYPESTATIC), rightPanelStart, tabY + 137, 50, 15);
+	doMoveWindow(deferCtx, retry, GetDlgItem(hDlg, IDC_EDITASSETTYPE), rightPanelStart, tabY + 152, rightPanelSize, 20);
+	doMoveWindow(deferCtx, retry, GetDlgItem(hDlg, IDC_VIEWDATA), rightPanelStart, tabY + 191, rightPanelSize, 25);
+	doMoveWindow(deferCtx, retry, GetDlgItem(hDlg, IDC_EXPORTRAW), rightPanelStart, tabY + 235, rightPanelSize, 25);
+	doMoveWindow(deferCtx, retry, GetDlgItem(hDlg, IDC_DUMPDATA), rightPanelStart, tabY + 279, rightPanelSize, 25);
+	doMoveWindow(deferCtx, retry, GetDlgItem(hDlg, IDC_PLUGINS), rightPanelStart, tabY + 323, rightPanelSize, 25);
+	doMoveWindow(deferCtx, retry, GetDlgItem(hDlg, IDC_IMPORTRAW), rightPanelStart, tabY + 367, rightPanelSize, 25);
+	doMoveWindow(deferCtx, retry, GetDlgItem(hDlg, IDC_IMPORTDUMP), rightPanelStart, tabY + 411, rightPanelSize, 25);
+	doMoveWindow(deferCtx, retry, GetDlgItem(hDlg, IDC_REMOVEASSET), rightPanelStart, tabY + 460, rightPanelSize, 25);
 	//doMoveWindow(deferCtx, retry, GetDlgItem(hDlg, IDOK), (clientWidth / 2) - 38, clientHeight - 33, 76, 26);
 
 	if (defer)
@@ -1405,7 +1522,7 @@ void AssetListDialog::onCacheUpdateTick()
 		if (updateTickFrequency) QueryPerformanceCounter(&preTimer);
 
 		if (cachedListEntryStartIdx > listEntries.size()) cachedListEntryStartIdx = 0;
-		AssetInfo *tmp;
+		AssetInfo* tmp;
 		size_t newEntries = cacheEntries(cachedListEntryStartIdx, listEntries.size(), tmp, maxEntriesPerTick, &cachedListEntryStartIdx);
 		if (newEntries < std::min(maxEntriesPerTick, listEntries.size() - cachedListEntryCount))
 		{
@@ -1438,7 +1555,7 @@ void AssetListDialog::onCacheUpdateTick()
 						maxEntriesPerTick *= 2;
 					else
 						maxEntriesPerTick = (maxEntriesPerTick / 4) * 5;
-					if (maxEntriesPerTick < 10) 
+					if (maxEntriesPerTick < 10)
 						maxEntriesPerTick = 10;
 				}
 				else
@@ -1455,7 +1572,7 @@ void AssetListDialog::onCacheUpdateTick()
 			//{growth rate near 1 for now}
 			else if (deltaMicro >= 13000)
 			{
-				if (maxEntriesPerTick <= 10) 
+				if (maxEntriesPerTick <= 10)
 				{
 					//Probably some bottleneck in traversing the list if it was sorted after starting caching.
 					//Just disable auto caching in that case, since reducing the amount of entries further likely won't help.
@@ -1492,15 +1609,15 @@ void AssetListDialog::onCacheUpdateTick()
 			SetTimer(hDialog, (uintptr_t)1, 16, NULL);
 	}
 }
-LRESULT CALLBACK AssetListDialog::ListViewSubclassProc(HWND hWnd, UINT message, 
-		WPARAM wParam, LPARAM lParam, 
-		uintptr_t uIdSubclass, DWORD_PTR dwRefData)
+LRESULT CALLBACK AssetListDialog::ListViewSubclassProc(HWND hWnd, UINT message,
+	WPARAM wParam, LPARAM lParam,
+	uintptr_t uIdSubclass, DWORD_PTR dwRefData)
 {
-	AssetListDialog *pThis = (AssetListDialog*)dwRefData;
+	AssetListDialog* pThis = (AssetListDialog*)dwRefData;
 	//switch (message)
 	//{
 	//}
-    return DefSubclassProc(hWnd, message, wParam, lParam);
+	return DefSubclassProc(hWnd, message, wParam, lParam);
 }
 void AssetListDialog::searchNext()
 {
@@ -1778,7 +1895,8 @@ INT_PTR CALLBACK AssetListDialog::AssetListProc(HWND hDlg, UINT message, WPARAM 
 	int wmId, wmEvent;
 	UNREFERENCED_PARAMETER(lParam);
 	INT_PTR ret = (INT_PTR)FALSE;
-	AssetListDialog *pThis = (AssetListDialog*)GetWindowLongPtr(hDlg, GWLP_USERDATA);
+	AssetListDialog* pThis = (AssetListDialog*)GetWindowLongPtr(hDlg, GWLP_USERDATA);
+
 	switch (message)
 	{
 	case WM_CLOSE:
@@ -1788,500 +1906,544 @@ INT_PTR CALLBACK AssetListDialog::AssetListProc(HWND hDlg, UINT message, WPARAM 
 		ret = (INT_PTR)TRUE;
 		break;
 	case WM_INITDIALOG:
-		{
-			SetWindowLongPtr(hDlg, GWLP_USERDATA, lParam);
-			pThis = (AssetListDialog*)lParam;
-			pThis->hDialog = hDlg;
-			//pMainWindow->assetsInfoDialog.hHotkeyHook = SetWindowsHookEx(WH_GETMESSAGE, AssetsInfoKeyboardHookProc, NULL, GetCurrentThreadId());
+	{
+		SetWindowLongPtr(hDlg, GWLP_USERDATA, lParam);
+		pThis = (AssetListDialog*)lParam;
+		pThis->hDialog = hDlg;
+		//pMainWindow->assetsInfoDialog.hHotkeyHook = SetWindowsHookEx(WH_GETMESSAGE, AssetsInfoKeyboardHookProc, NULL, GetCurrentThreadId());
 
-			pThis->selectionUpdateScheduled = false;
-			pThis->windowUpdateScheduled = false;
-			pThis->entryCachingScheduled = false;
-			HWND hAssetListView = GetDlgItem(hDlg, IDC_ASSETLIST);
-			//SetWindowSubclass(hAssetListView, ListViewSubclassProc, 0, reinterpret_cast<DWORD_PTR>(pThis));
-			ShowWindow(hAssetListView, SW_HIDE);
+		pThis->selectionUpdateScheduled = false;
+		pThis->windowUpdateScheduled = false;
+		pThis->entryCachingScheduled = false;
+		HWND hAssetListView = GetDlgItem(hDlg, IDC_ASSETLIST);
+		//SetWindowSubclass(hAssetListView, ListViewSubclassProc, 0, reinterpret_cast<DWORD_PTR>(pThis));
+		ShowWindow(hAssetListView, SW_HIDE);
 
-			ShowWindow(hAssetListView, SW_SHOW);
-			ListView_SetItemCount(GetDlgItem(hDlg, IDC_ASSETLIST), (int)std::min<size_t>(pThis->listEntries.size(), INT_MAX));
+		ShowWindow(hAssetListView, SW_SHOW);
+		ListView_SetItemCount(GetDlgItem(hDlg, IDC_ASSETLIST), (int)std::min<size_t>(pThis->listEntries.size(), INT_MAX));
 
-			LVCOLUMN column;
-			ZeroMemory(&column, sizeof(LVCOLUMN));
-			column.mask = LVCF_TEXT | LVCF_WIDTH | LVCF_SUBITEM;
-			column.cx = 150;
-			column.pszText = const_cast<TCHAR*>(TEXT("Name"));
-			column.iSubItem = 0;
-			ListView_InsertColumn(hAssetListView, 0, &column);
-			column.cx = 150;
-			column.pszText = const_cast<TCHAR*>(TEXT("Container"));
-			//column.iSubItem = 1;
-			ListView_InsertColumn(hAssetListView, 1, &column);
-			column.cx = 60;
-			column.pszText = const_cast<TCHAR*>(TEXT("Type"));
-			//column.iSubItem = 2;
-			ListView_InsertColumn(hAssetListView, 2, &column);
-			column.cx = 50;
-			column.pszText = const_cast<TCHAR*>(TEXT("File ID"));
-			//column.iSubItem = 3;
-			ListView_InsertColumn(hAssetListView, 3, &column);
-			column.cx = 60;
-			column.pszText = const_cast<TCHAR*>(TEXT("Path ID"));
-			//column.iSubItem = 4;
-			ListView_InsertColumn(hAssetListView, 4, &column);
-			column.mask |= LVCF_FMT;
-			column.cx = 70;
-			column.fmt = LVCFMT_RIGHT;
-			column.pszText = const_cast<TCHAR*>(TEXT("Size (bytes)"));
-			//column.iSubItem = 5;
-			ListView_InsertColumn(hAssetListView, 5, &column);
-			column.fmt = LVCFMT_LEFT;
-			column.cx = 60;
-			column.pszText = const_cast<TCHAR*>(TEXT("Modified"));
-			ListView_InsertColumn(hAssetListView, 6, &column);
+		LVCOLUMN column;
+		ZeroMemory(&column, sizeof(LVCOLUMN));
+		column.mask = LVCF_TEXT | LVCF_WIDTH | LVCF_SUBITEM;
+		column.cx = 150;
+		column.pszText = const_cast<TCHAR*>(TEXT("Name"));
+		column.iSubItem = 0;
+		ListView_InsertColumn(hAssetListView, 0, &column);
+		column.cx = 150;
+		column.pszText = const_cast<TCHAR*>(TEXT("Container"));
+		//column.iSubItem = 1;
+		ListView_InsertColumn(hAssetListView, 1, &column);
+		column.cx = 60;
+		column.pszText = const_cast<TCHAR*>(TEXT("Type"));
+		//column.iSubItem = 2;
+		ListView_InsertColumn(hAssetListView, 2, &column);
+		column.cx = 50;
+		column.pszText = const_cast<TCHAR*>(TEXT("File ID"));
+		//column.iSubItem = 3;
+		ListView_InsertColumn(hAssetListView, 3, &column);
+		column.cx = 60;
+		column.pszText = const_cast<TCHAR*>(TEXT("Path ID"));
+		//column.iSubItem = 4;
+		ListView_InsertColumn(hAssetListView, 4, &column);
+		column.mask |= LVCF_FMT;
+		column.cx = 70;
+		column.fmt = LVCFMT_RIGHT;
+		column.pszText = const_cast<TCHAR*>(TEXT("Size (bytes)"));
+		//column.iSubItem = 5;
+		ListView_InsertColumn(hAssetListView, 5, &column);
+		column.fmt = LVCFMT_LEFT;
+		column.cx = 60;
+		column.pszText = const_cast<TCHAR*>(TEXT("Modified"));
+		ListView_InsertColumn(hAssetListView, 6, &column);
 
-			ListView_SetCallbackMask(hAssetListView, LVIS_SELECTED);
+		ListView_SetCallbackMask(hAssetListView, LVIS_SELECTED);
 
-			{
-				HWND hTabsControl = GetDlgItem(hDlg, IDC_ASSETLISTMODIFYTABS);
-				MC_MTITEMWIDTH widths;
-				widths.dwDefWidth = 0;
-				widths.dwMinWidth = 90;
-				SendMessage(hTabsControl, MC_MTM_SETITEMWIDTH, 0, (LPARAM) &widths);
-				
-				std::shared_ptr<AssetModifyDialog> modifyDialogToSelect = pThis->pActiveModifyDialog;
-
-				MC_MTITEM newItem = {};
-				newItem.dwMask = MC_MTIF_TEXT | MC_MTIF_PARAM | MC_MTIF_CLOSEFLAG;
-				newItem.pszText = const_cast<TCHAR*>(TEXT("Asset list"));
-				newItem.lParam = 0;
-				newItem.bDisableClose = TRUE;
-				SendMessage(hTabsControl, MC_MTM_INSERTITEM, (WPARAM)0, (LPARAM)&newItem);
-				if (!pThis->modifyDialogs.empty())
-				{
-					ShowWindow(hTabsControl, SW_SHOW);
-					size_t newTabIdx = 1;
-
-					size_t tabIdxToSelect = 0;
-					for (auto dialogIt = pThis->modifyDialogs.begin(); dialogIt != pThis->modifyDialogs.end(); ++dialogIt)
-					{
-						if (modifyDialogToSelect != nullptr && dialogIt->get() == modifyDialogToSelect.get())
-							tabIdxToSelect = newTabIdx;
-						std::string tabName8 = (*dialogIt != nullptr) ? dialogIt->get()->getTabName() : "-";
-						auto upTabNameT = unique_MultiByteToTCHAR(tabName8.c_str());
-
-						newItem.dwMask = MC_MTIF_TEXT | MC_MTIF_PARAM;
-						newItem.pszText = upTabNameT.get();
-						newItem.lParam = (LPARAM)dialogIt->get();
-						SendMessage(hTabsControl, MC_MTM_INSERTITEM, (WPARAM)newTabIdx, (LPARAM)&newItem);
-
-						newTabIdx++;
-					}
-
-					SendMessage(hTabsControl, MC_MTM_SETCURSEL, (WPARAM)tabIdxToSelect, 0); //Also sends a SELCHANGE notification.
-				}
-			}
-
-			
-			if (pThis->iLastTopItem >= 0 && pThis->iLastTopItem < pThis->listEntries.size())
-			{
-				ListView_EnsureVisible(hAssetListView, pThis->iLastTopItem, FALSE);
-			}
-
-			//Tooltip style for item text; Double buffering to prevent flickering while scrolling, resizing, etc.
-			ListView_SetExtendedListViewStyle(hAssetListView, LVS_EX_INFOTIP | LVS_EX_LABELTIP | LVS_EX_DOUBLEBUFFER | LVS_EX_ONECLICKACTIVATE | LVS_EX_UNDERLINEHOT);
-			
-			pThis->iFocusedItem = -1;
-
-			if (pThis->listEntries.size() > 0)
-			{
-				pThis->entryCachingScheduled = true;
-				SetTimer(hDlg, (uintptr_t)1, 16, NULL);
-			}
-
-			//Will not fail (on Win >= XP) according to MS docs.
-			QueryPerformanceFrequency(&pThis->qpfrequency);
-			pThis->ticksUntilCacheFreqUpdate = 1;
-
-			ShowWindow(hDlg, SW_SHOW);
-			PostMessage(hDlg, WM_SIZE, 0, 0);
-			ret = (INT_PTR)TRUE;
-		}
-		break;
-	case WM_TIMER:
-		{
-			if (wParam == (uintptr_t)0 && pThis && pThis->windowUpdateScheduled)
-			{
-				pThis->windowUpdateScheduled = false;
-				KillTimer(hDlg, wParam);
-				UpdateWindow(GetDlgItem(hDlg, IDC_ASSETLIST));
-			}
-			if (wParam == (uintptr_t)1 && pThis)
-			{
-				pThis->onCacheUpdateTick();
-			}
-			if (wParam == (uintptr_t)2 && pThis->selectionUpdateScheduled)
-			{
-				pThis->selectionUpdateScheduled = false;
-				KillTimer(hDlg, wParam);
-				pThis->applyDeferredChanges();
-				pThis->updateSelectionDesc();
-			}
-		}
-		ret = 0;
-		break;
-	case WM_NOTIFY:
-		{
-			NMLISTVIEW *pNotifyLV = (NMLISTVIEW*)lParam;
-			switch (pNotifyLV->hdr.code)
-			{
-				case LVN_ITEMCHANGED:
-					{
-						NMLISTVIEW *pInfo = (NMLISTVIEW*)lParam;
-						if (pThis)
-						{
-							if ((pInfo->uOldState ^ pInfo->uNewState) & LVIS_SELECTED)
-							{
-								bool isSelected = (pInfo->uNewState & LVIS_SELECTED) ? true : false;
-								int iItem = pInfo->iItem;
-								if (iItem == -1)
-								{
-									for (size_t i = 0; i < pThis->listEntries.size(); i++)
-									{
-										pThis->listEntries[i].isSelected = isSelected;
-									}
-								}
-								else if (iItem >= 0 && iItem < pThis->listEntries.size())
-								{
-									pThis->listEntries[iItem].isSelected = isSelected;
-								}
-							}
-							if (pInfo->uNewState & LVIS_FOCUSED)
-							{
-								pThis->iFocusedItem = pInfo->iItem;
-							}
-						}
-					}
-					pThis->updateSelectionDesc();
-					break;
-				case LVN_ODSTATECHANGED:
-					{
-						NMLVODSTATECHANGE *pInfo = (NMLVODSTATECHANGE*)lParam;
-						if (pThis)
-						{
-							int from = pInfo->iFrom; 
-							if (from < 0)
-								from = 0;
-							int to = pInfo->iTo; 
-							if (to < 0 || to >= pThis->listEntries.size()) 
-								to = (pThis->listEntries.size() > INT_MAX) ? INT_MAX : (int)(pThis->listEntries.size() - 1);
-
-							if ((pInfo->uOldState ^ pInfo->uNewState) & LVIS_SELECTED)
-							{
-								bool isSelected = (pInfo->uNewState & LVIS_SELECTED) ? true : false;
-								for (int i = from; i <= to; i++)
-								{
-									pThis->listEntries[i].isSelected = isSelected;
-								}
-							}
-							if (pInfo->uNewState & LVIS_FOCUSED)
-							{
-								pThis->iFocusedItem = pInfo->iFrom;
-							}
-						}
-					}
-					pThis->updateSelectionDesc();
-					break;
-				case LVN_GETINFOTIP:
-					{
-						NMLVGETINFOTIP *pInfo = (NMLVGETINFOTIP*)lParam;
-						int iItem = pInfo->iItem;
-						if (pThis && iItem >= 0 && iItem < pThis->listEntries.size())
-						{
-							AssetInfo *pEntry = nullptr;
-							pThis->cacheEntry(iItem, pEntry);
-							if (pEntry)
-							{
-								assert(pThis->lvStringBuf_Tooltip.size() >= 2);
-								//Shift the string buffer list (removing the oldest if needed).
-								for (size_t i = pThis->lvStringBuf_Tooltip.size() - 1; i > 0; i--)
-									pThis->lvStringBuf_Tooltip[i] = std::move(pThis->lvStringBuf_Tooltip[i-1]);
-								pThis->lvStringBuf_Tooltip[0].reset();
-								pInfo->cchTextMax = 0;
-								pInfo->pszText = const_cast<TCHAR*>(TEXT(""));
-								//Retrieve the entry text and store the string buffer.
-								std::unique_ptr<TCHAR[]> newTextBuf;
-								pThis->getEntryText(iItem, pInfo->iSubItem, *pEntry, newTextBuf);
-								pThis->lvStringBuf_Tooltip[0].swap(newTextBuf);
-								if (pThis->lvStringBuf_Tooltip[0] != nullptr)
-									pInfo->pszText = pThis->lvStringBuf_Tooltip[0].get();
-							}
-						}
-					}
-					break;
-				case LVN_GETDISPINFO:
-					{
-						NMLVDISPINFO *pInfo = (NMLVDISPINFO*)lParam;
-						int iItem = pInfo->item.iItem;
-						if (pThis && iItem >= 0 && iItem < pThis->listEntries.size())
-						{
-							AssetInfo *pEntry = nullptr;
-							pThis->cacheEntry(iItem, pEntry);
-							if (pEntry)
-							{
-								UINT newMask = 0;
-								pInfo->item.lParam = (LPARAM)iItem;
-								newMask |= LVIF_PARAM;
-								pInfo->item.stateMask = LVIS_SELECTED;
-								if (pInfo->item.iSubItem == 0)
-									pInfo->item.state = (pThis->listEntries[iItem].isSelected ? LVIS_SELECTED : 0);
-								else
-									pInfo->item.state = 0;
-								newMask |= LVIF_STATE;
-								if (pInfo->item.mask & LVIF_TEXT)
-								{
-									newMask |= LVIF_TEXT;
-									assert(pThis->lvStringBuf_Ownerdata.size() >= 2);
-									//Shift the string buffer list (removing the oldest if needed).
-									for (size_t i = pThis->lvStringBuf_Ownerdata.size() - 1; i > 0; i--)
-										pThis->lvStringBuf_Ownerdata[i] = std::move(pThis->lvStringBuf_Ownerdata[i-1]);
-									pThis->lvStringBuf_Ownerdata[0].reset();
-									//Retrieve the entry text and store the string buffer.
-									pInfo->item.cchTextMax = 0;
-									pInfo->item.pszText = const_cast<TCHAR*>(TEXT(""));
-									std::unique_ptr<TCHAR[]> newTextBuf = nullptr;
-									pThis->getEntryText(iItem, pInfo->item.iSubItem, *pEntry, newTextBuf);
-									pThis->lvStringBuf_Ownerdata[0].swap(newTextBuf);
-									if (pThis->lvStringBuf_Ownerdata[0] != nullptr)
-										pInfo->item.pszText = pThis->lvStringBuf_Ownerdata[0].get();
-								}
-								pInfo->item.mask = newMask;
-
-								bool isSelected = pThis->listEntries[iItem].isSelected;
-								bool isFocused = (iItem == pThis->iFocusedItem);
-								//Workaround in case the ListView's selection states are not in sync.
-								//The GetDispInfo selection status is only used for visual purposes and does not touch the item state.
-								ListView_SetItemState(pInfo->hdr.hwndFrom, iItem, 
-									((isSelected) ? LVIS_SELECTED : 0) | ((isFocused) ? LVIS_FOCUSED : 0), //state
-									LVIS_SELECTED | ((isFocused) ? LVIS_FOCUSED : 0)); //mask; Only set LVIS_FOCUSED, don't reset.
-							}
-						}
-					}
-					ret = (INT_PTR)TRUE;
-					break;
-				case LVN_SETDISPINFO:
-					{
-						NMLVDISPINFO *pInfo = (NMLVDISPINFO*)lParam;
-						int iItem = pInfo->item.iItem;
-						if (pThis && iItem >= 0 && iItem < pThis->listEntries.size())
-						{
-							if (pInfo->item.mask & LVIF_STATE)
-							{
-								if ((pInfo->item.stateMask & LVIS_FOCUSED) && (pInfo->item.state & LVIS_FOCUSED))
-								{
-									pThis->iFocusedItem = iItem;
-								}
-								if (pInfo->item.stateMask & LVIS_SELECTED)
-								{
-									bool isSelected = (pInfo->item.state & LVIS_SELECTED) ? true : false;
-									if (isSelected != pThis->listEntries[iItem].isSelected)
-									{
-										pThis->listEntries[iItem].isSelected = isSelected;
-										pThis->updateSelectionDesc();
-									}
-								}
-							}
-						}
-					}
-					break;
-				case LVN_ODCACHEHINT:
-					{
-						NMLVCACHEHINT *pInfo = (NMLVCACHEHINT*)lParam;
-						if (pThis && pInfo->iFrom >= 0 && pInfo->iTo >= pInfo->iFrom)
-						{
-							AssetInfo *pEntry = nullptr;
-							pThis->cachedListEntryCount += pThis->cacheEntries(pInfo->iFrom, pInfo->iTo + 1, pEntry);
-						}
-					}
-					ret = (INT_PTR)TRUE;
-					break;
-				case LVN_ODFINDITEM:
-					{
-						LVFINDINFO *pInfo = (LVFINDINFO*)lParam;
-						//TODO
-					}
-					SetWindowLongPtr(hDlg, DWLP_MSGRESULT, -1); 
-					ret = (INT_PTR)TRUE;
-					break;
-				case LVN_COLUMNCLICK:
-					{
-						NMLISTVIEW *pInfo = (NMLISTVIEW*)lParam;
-						if (pThis)
-						{
-							pThis->sortOrderAscending ^= (pThis->sorted && pThis->iSortColumn == pInfo->iSubItem);
-							pThis->iSortColumn = pInfo->iSubItem;
-							pThis->sorted = false;
-							pThis->resort();
-						}
-					}
-					break;
-				case LVN_ITEMACTIVATE:
-					{
-						NMITEMACTIVATE *pInfo = (NMITEMACTIVATE*)lParam;
-						if (pThis)
-						{
-							if ((pInfo->iItem >= 0 && pInfo->iItem < pThis->listEntries.size() && pThis->listEntries[pInfo->iItem].isSelected)
-								&& !(pInfo->uKeyFlags & (LVKF_CONTROL | LVKF_SHIFT)))
-							{
-								int topIdx = ListView_GetTopIndex(pInfo->hdr.hwndFrom);
-								int bottomIdx = topIdx + ListView_GetCountPerPage(pInfo->hdr.hwndFrom) + 1;
-
-								//Deselect all. Required when the Win32 dialog is closed and reopened and there are still selected items.
-								//Otherwise, the old selection would stay even when just clicking an item.
-								ListView_SetItemState(pInfo->hdr.hwndFrom, -1, 0, LVIS_SELECTED);
-								ListView_SetItemState(pInfo->hdr.hwndFrom, pInfo->iItem, LVIS_SELECTED, LVIS_SELECTED);
-							}
-						}
-					}
-					break;
-				case MC_MTN_CLOSEITEM:
-					if (((NMHDR*)lParam)->hwndFrom == GetDlgItem(hDlg, IDC_ASSETLISTMODIFYTABS))
-					{
-						MC_NMMTCLOSEITEM *pNotification = (MC_NMMTCLOSEITEM*)lParam;
-						if (!pThis->preDeleteTab(pNotification))
-							SetWindowLongPtr(hDlg, DWLP_MSGRESULT, TRUE);
-						return (INT_PTR)TRUE; //Prevent tab deletion.
-					}
-					break;
-				case MC_MTN_DELETEITEM:
-					if (((NMHDR*)lParam)->hwndFrom == GetDlgItem(hDlg, IDC_ASSETLISTMODIFYTABS))
-					{
-						MC_NMMTDELETEITEM *pNotification = (MC_NMMTDELETEITEM*)lParam;
-						pThis->onDeleteTab(pNotification);
-					}
-					break;
-				case MC_MTN_SELCHANGE:
-					if (((NMHDR*)lParam)->hwndFrom == GetDlgItem(hDlg, IDC_ASSETLISTMODIFYTABS))
-					{
-						MC_NMMTSELCHANGE *pNotification = (MC_NMMTSELCHANGE*)lParam;
-						pThis->onSwitchTabs(pNotification);
-					}
-					break;
-				case MC_MTN_DELETEALLITEMS:
-					if (((NMHDR*)lParam)->hwndFrom == GetDlgItem(hDlg, IDC_ASSETLISTMODIFYTABS))
-					{
-						SetWindowLongPtr(hDlg, DWLP_MSGRESULT, TRUE);
-						return (INT_PTR)TRUE; //When the dialog closes due to a <onHide> call, keep the internal tabs.
-					}
-					break;
-			}
-		}
-		break;
-	case WM_COMMAND:
-		wmId    = LOWORD(wParam);
-		wmEvent = HIWORD(wParam);
-		switch (wmId)
-		{
-			case IDM_FILE_CLOSE:
-				//if (AskSaveAssetsInfo(pMainWindow, hDlg))
-				{
-					if (pThis)
-						pThis->pContext->getMainWindow().hideManipulateDialog(pThis);
-					else
-						SendMessage(hDlg, WM_CLOSE, 0, 0);
-				}
-				return (INT_PTR)TRUE;
-			case IDM_FILE_APPLY:
-				//Already handled in onCommand
-				break;
-			case IDM_VIEW_CONTINUESEARCH:
-				pThis->searchNext();
-				break;
-			case IDM_VIEW_SEARCHBYNAME:
-				{
-					std::shared_ptr<IFileManipulateDialog> pSelfRef = pThis->selfPtr.lock();
-					if (!pSelfRef) { assert(false); break; }
-					if (DialogBoxParam(pThis->pContext->getMainWindow().getHInstance(),
-						MAKEINTRESOURCE(IDD_SEARCHASSET),
-						pThis->hParentWnd ? pThis->hParentWnd : hDlg,
-						SearchDlgProc,
-						(LPARAM)pThis)
-						== 1)
-					{
-						pThis->searchNext();
-						EnableMenuItem(pThis->pContext->getMainWindow().getMenu(), IDM_VIEW_CONTINUESEARCH, MF_ENABLED);
-					}
-				}
-				break;
-			case IDM_VIEW_GOTOASSET:
-				{
-					std::shared_ptr<IFileManipulateDialog> pSelfRef = pThis->selfPtr.lock();
-					if (!pSelfRef) { assert(false); break; }
-					DialogBoxParam(pThis->pContext->getMainWindow().getHInstance(),
-						MAKEINTRESOURCE(IDD_GOTOASSET),
-						pThis->hParentWnd ? pThis->hParentWnd : hDlg,
-						GotoDlgProc,
-						(LPARAM)pThis);
-				}
-				break;
-			case IDM_VIEW_CONTAINERS:
-				/*if (pMainWindow->assetsInfoDialog.hContainersDlg)
-				{
-					SetWindowPos(pMainWindow->assetsInfoDialog.hContainersDlg, hDlg, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
-				}
-				else
-				{
-					pMainWindow->assetsInfoDialog.hContainersDlg = CreateDialogParam(hInst, MAKEINTRESOURCE(IDD_VIEWCONTAINERS), NULL, ViewContainers, NULL);
-					if (pMainWindow->assetsInfoDialog.hContainersDlg)
-					{
-						//https://stackoverflow.com/questions/812686/can-a-window-be-always-on-top-of-just-one-other-window
-						SetWindowLongPtr(pMainWindow->assetsInfoDialog.hContainersDlg, GWLP_HWNDPARENT, (LONG_PTR)hDlg);
-						RECT targetRect = {};
-						GetWindowRect(hDlg, &targetRect);
-						SetWindowPos(pMainWindow->assetsInfoDialog.hContainersDlg, hDlg, targetRect.left, targetRect.top, 0, 0, SWP_NOSIZE);
-					}
-				}*/
-				break;
-			case IDC_VIEWDATA:
-				pThis->openViewDataTab();
-				break;
-			case IDC_DUMPDATA:
-				pThis->onExportDumpButton();
-				break;
-			case IDC_EXPORTRAW:
-				pThis->exportAssetsRaw(pThis->getSelectedAssets());
-				break;
-			case IDC_PLUGINS:
-				pThis->onPluginButton();
-				break;
-			case IDC_IMPORTRAW:
-				pThis->importAssetsRaw(pThis->getSelectedAssets());
-				break;
-			case IDC_IMPORTDUMP:
-				pThis->importAssetsDump(pThis->getSelectedAssets());
-				break;
-			case IDC_REMOVEASSET:
-				pThis->requestRemoveSelectedAssets();
-				break;
-		}
-		break;
-	case WM_SIZE:
 		{
 			HWND hTabsControl = GetDlgItem(hDlg, IDC_ASSETLISTMODIFYTABS);
-			HWND hActiveTabWnd = NULL;
-			int curTab = (int)SendMessage(hTabsControl, MC_MTM_GETCURSEL, 0, 0);
-			if (curTab != -1)
+			MC_MTITEMWIDTH widths;
+			widths.dwDefWidth = 0;
+			widths.dwMinWidth = 90;
+			SendMessage(hTabsControl, MC_MTM_SETITEMWIDTH, 0, (LPARAM)&widths);
+
+			std::shared_ptr<AssetModifyDialog> modifyDialogToSelect = pThis->pActiveModifyDialog;
+
+			MC_MTITEM newItem = {};
+			newItem.dwMask = MC_MTIF_TEXT | MC_MTIF_PARAM | MC_MTIF_CLOSEFLAG;
+			newItem.pszText = const_cast<TCHAR*>(TEXT("Asset list"));
+			newItem.lParam = 0;
+			newItem.bDisableClose = TRUE;
+			SendMessage(hTabsControl, MC_MTM_INSERTITEM, (WPARAM)0, (LPARAM)&newItem);
+			if (!pThis->modifyDialogs.empty())
 			{
-				MC_MTITEM item = {};
-				item.dwMask = MC_MTIF_PARAM;
-				if (SendMessage(hTabsControl, MC_MTM_GETITEM, (WPARAM)curTab, (LPARAM)&item) == TRUE)
+				ShowWindow(hTabsControl, SW_SHOW);
+				size_t newTabIdx = 1;
+
+				size_t tabIdxToSelect = 0;
+				for (auto dialogIt = pThis->modifyDialogs.begin(); dialogIt != pThis->modifyDialogs.end(); ++dialogIt)
 				{
-					if (item.lParam != 0)
-						hActiveTabWnd = reinterpret_cast<AssetModifyDialog*>(item.lParam)->getWindowHandle();
+					if (modifyDialogToSelect != nullptr && dialogIt->get() == modifyDialogToSelect.get())
+						tabIdxToSelect = newTabIdx;
+					std::string tabName8 = (*dialogIt != nullptr) ? dialogIt->get()->getTabName() : "-";
+					auto upTabNameT = unique_MultiByteToTCHAR(tabName8.c_str());
+
+					newItem.dwMask = MC_MTIF_TEXT | MC_MTIF_PARAM;
+					newItem.pszText = upTabNameT.get();
+					newItem.lParam = (LPARAM)dialogIt->get();
+					SendMessage(hTabsControl, MC_MTM_INSERTITEM, (WPARAM)newTabIdx, (LPARAM)&newItem);
+
+					newTabIdx++;
+				}
+
+				SendMessage(hTabsControl, MC_MTM_SETCURSEL, (WPARAM)tabIdxToSelect, 0); //Also sends a SELCHANGE notification.
+			}
+		}
+
+
+		if (pThis->iLastTopItem >= 0 && pThis->iLastTopItem < pThis->listEntries.size())
+		{
+			ListView_EnsureVisible(hAssetListView, pThis->iLastTopItem, FALSE);
+		}
+
+		//Tooltip style for item text; Double buffering to prevent flickering while scrolling, resizing, etc.
+		ListView_SetExtendedListViewStyle(hAssetListView, LVS_EX_INFOTIP | LVS_EX_LABELTIP | LVS_EX_DOUBLEBUFFER | LVS_EX_ONECLICKACTIVATE | LVS_EX_UNDERLINEHOT);
+
+		pThis->iFocusedItem = -1;
+
+		if (pThis->listEntries.size() > 0)
+		{
+			pThis->entryCachingScheduled = true;
+			SetTimer(hDlg, (uintptr_t)1, 16, NULL);
+		}
+
+		//Will not fail (on Win >= XP) according to MS docs.
+		QueryPerformanceFrequency(&pThis->qpfrequency);
+		pThis->ticksUntilCacheFreqUpdate = 1;
+
+		ShowWindow(hDlg, SW_SHOW);
+		PostMessage(hDlg, WM_SIZE, 0, 0);
+		ret = (INT_PTR)TRUE;
+	}
+	break;
+	case WM_TIMER:
+	{
+		if (wParam == (uintptr_t)0 && pThis && pThis->windowUpdateScheduled)
+		{
+			pThis->windowUpdateScheduled = false;
+			KillTimer(hDlg, wParam);
+			UpdateWindow(GetDlgItem(hDlg, IDC_ASSETLIST));
+		}
+		if (wParam == (uintptr_t)1 && pThis)
+		{
+			pThis->onCacheUpdateTick();
+		}
+		if (wParam == (uintptr_t)2 && pThis->selectionUpdateScheduled)
+		{
+			pThis->selectionUpdateScheduled = false;
+			KillTimer(hDlg, wParam);
+			pThis->applyDeferredChanges();
+			pThis->updateSelectionDesc();
+		}
+	}
+	ret = 0;
+	break;
+	case WM_NOTIFY:
+	{
+		NMLISTVIEW* pNotifyLV = (NMLISTVIEW*)lParam;
+		switch (pNotifyLV->hdr.code)
+		{
+		case LVN_ITEMCHANGED:
+		{
+			NMLISTVIEW* pInfo = (NMLISTVIEW*)lParam;
+			if (pThis)
+			{
+				if ((pInfo->uOldState ^ pInfo->uNewState) & LVIS_SELECTED)
+				{
+					bool isSelected = (pInfo->uNewState & LVIS_SELECTED) ? true : false;
+					int iItem = pInfo->iItem;
+					if (iItem == -1)
+					{
+						for (size_t i = 0; i < pThis->listEntries.size(); i++)
+						{
+							pThis->listEntries[i].isSelected = isSelected;
+						}
+					}
+					else if (iItem >= 0 && iItem < pThis->listEntries.size())
+					{
+						pThis->listEntries[iItem].isSelected = isSelected;
+					}
+				}
+				if (pInfo->uNewState & LVIS_FOCUSED)
+				{
+					pThis->iFocusedItem = pInfo->iItem;
 				}
 			}
-			onResize(hDlg, hActiveTabWnd);
+		}
+		pThis->updateSelectionDesc();
+		break;
+		case LVN_ODSTATECHANGED:
+		{
+			NMLVODSTATECHANGE* pInfo = (NMLVODSTATECHANGE*)lParam;
+			if (pThis)
+			{
+				int from = pInfo->iFrom;
+				if (from < 0)
+					from = 0;
+				int to = pInfo->iTo;
+				if (to < 0 || to >= pThis->listEntries.size())
+					to = (pThis->listEntries.size() > INT_MAX) ? INT_MAX : (int)(pThis->listEntries.size() - 1);
+
+				if ((pInfo->uOldState ^ pInfo->uNewState) & LVIS_SELECTED)
+				{
+					bool isSelected = (pInfo->uNewState & LVIS_SELECTED) ? true : false;
+					for (int i = from; i <= to; i++)
+					{
+						pThis->listEntries[i].isSelected = isSelected;
+					}
+				}
+				if (pInfo->uNewState & LVIS_FOCUSED)
+				{
+					pThis->iFocusedItem = pInfo->iFrom;
+				}
+			}
+		}
+		pThis->updateSelectionDesc();
+		break;
+		case LVN_GETINFOTIP:
+		{
+			NMLVGETINFOTIP* pInfo = (NMLVGETINFOTIP*)lParam;
+			int iItem = pInfo->iItem;
+			if (pThis&& iItem >= 0 && iItem < pThis->listEntries.size())
+			{
+				AssetInfo* pEntry = nullptr;
+				pThis->cacheEntry(iItem, pEntry);
+				if (pEntry)
+				{
+					assert(pThis->lvStringBuf_Tooltip.size() >= 2);
+					//Shift the string buffer list (removing the oldest if needed).
+					for (size_t i = pThis->lvStringBuf_Tooltip.size() - 1; i > 0; i--)
+						pThis->lvStringBuf_Tooltip[i] = std::move(pThis->lvStringBuf_Tooltip[i - 1]);
+					pThis->lvStringBuf_Tooltip[0].reset();
+					pInfo->cchTextMax = 0;
+					pInfo->pszText = const_cast<TCHAR*>(TEXT(""));
+					//Retrieve the entry text and store the string buffer.
+					std::unique_ptr<TCHAR[]> newTextBuf;
+					pThis->getEntryText(iItem, pInfo->iSubItem, *pEntry, newTextBuf);
+					pThis->lvStringBuf_Tooltip[0].swap(newTextBuf);
+					if (pThis->lvStringBuf_Tooltip[0] != nullptr)
+						pInfo->pszText = pThis->lvStringBuf_Tooltip[0].get();
+				}
+			}
+		}
+		break;
+		case LVN_GETDISPINFO:
+		{
+			NMLVDISPINFO* pInfo = (NMLVDISPINFO*)lParam;
+			int iItem = pInfo->item.iItem;
+			if (pThis&& iItem >= 0 && iItem < pThis->listEntries.size())
+			{
+				AssetInfo* pEntry = nullptr;
+				pThis->cacheEntry(iItem, pEntry);
+				if (pEntry)
+				{
+					UINT newMask = 0;
+					pInfo->item.lParam = (LPARAM)iItem;
+					newMask |= LVIF_PARAM;
+					pInfo->item.stateMask = LVIS_SELECTED;
+					if (pInfo->item.iSubItem == 0)
+						pInfo->item.state = (pThis->listEntries[iItem].isSelected ? LVIS_SELECTED : 0);
+					else
+						pInfo->item.state = 0;
+					newMask |= LVIF_STATE;
+					if (pInfo->item.mask & LVIF_TEXT)
+					{
+						newMask |= LVIF_TEXT;
+						assert(pThis->lvStringBuf_Ownerdata.size() >= 2);
+						//Shift the string buffer list (removing the oldest if needed).
+						for (size_t i = pThis->lvStringBuf_Ownerdata.size() - 1; i > 0; i--)
+							pThis->lvStringBuf_Ownerdata[i] = std::move(pThis->lvStringBuf_Ownerdata[i - 1]);
+						pThis->lvStringBuf_Ownerdata[0].reset();
+						//Retrieve the entry text and store the string buffer.
+						pInfo->item.cchTextMax = 0;
+						pInfo->item.pszText = const_cast<TCHAR*>(TEXT(""));
+						std::unique_ptr<TCHAR[]> newTextBuf = nullptr;
+						pThis->getEntryText(iItem, pInfo->item.iSubItem, *pEntry, newTextBuf);
+						pThis->lvStringBuf_Ownerdata[0].swap(newTextBuf);
+						if (pThis->lvStringBuf_Ownerdata[0] != nullptr)
+							pInfo->item.pszText = pThis->lvStringBuf_Ownerdata[0].get();
+					}
+					pInfo->item.mask = newMask;
+
+					bool isSelected = pThis->listEntries[iItem].isSelected;
+					bool isFocused = (iItem == pThis->iFocusedItem);
+					//Workaround in case the ListView's selection states are not in sync.
+					//The GetDispInfo selection status is only used for visual purposes and does not touch the item state.
+					ListView_SetItemState(pInfo->hdr.hwndFrom, iItem,
+						((isSelected) ? LVIS_SELECTED : 0) | ((isFocused) ? LVIS_FOCUSED : 0), //state
+						LVIS_SELECTED | ((isFocused) ? LVIS_FOCUSED : 0)); //mask; Only set LVIS_FOCUSED, don't reset.
+				}
+			}
+		}
+		ret = (INT_PTR)TRUE;
+		break;
+		case LVN_SETDISPINFO:
+		{
+			NMLVDISPINFO* pInfo = (NMLVDISPINFO*)lParam;
+			int iItem = pInfo->item.iItem;
+			if (pThis && iItem >= 0 && iItem < pThis->listEntries.size())
+			{
+				if (pInfo->item.mask & LVIF_STATE)
+				{
+					if ((pInfo->item.stateMask & LVIS_FOCUSED) && (pInfo->item.state & LVIS_FOCUSED))
+					{
+						pThis->iFocusedItem = iItem;
+					}
+					if (pInfo->item.stateMask & LVIS_SELECTED)
+					{
+						bool isSelected = (pInfo->item.state & LVIS_SELECTED) ? true : false;
+						if (isSelected != pThis->listEntries[iItem].isSelected)
+						{
+							pThis->listEntries[iItem].isSelected = isSelected;
+							pThis->updateSelectionDesc();
+						}
+					}
+				}
+			}
+		}
+		break;
+		case LVN_ODCACHEHINT:
+		{
+			NMLVCACHEHINT* pInfo = (NMLVCACHEHINT*)lParam;
+			if (pThis && pInfo->iFrom >= 0 && pInfo->iTo >= pInfo->iFrom)
+			{
+				AssetInfo* pEntry = nullptr;
+				pThis->cachedListEntryCount += pThis->cacheEntries(pInfo->iFrom, pInfo->iTo + 1, pEntry);
+			}
+		}
+		ret = (INT_PTR)TRUE;
+		break;
+		case LVN_ODFINDITEM:
+		{
+			LVFINDINFO* pInfo = (LVFINDINFO*)lParam;
+			//TODO
+		}
+		SetWindowLongPtr(hDlg, DWLP_MSGRESULT, -1);
+		ret = (INT_PTR)TRUE;
+		break;
+		case LVN_COLUMNCLICK:
+		{
+			NMLISTVIEW* pInfo = (NMLISTVIEW*)lParam;
+			if (pThis)
+			{
+				pThis->sortOrderAscending ^= (pThis->sorted && pThis->iSortColumn == pInfo->iSubItem);
+				pThis->iSortColumn = pInfo->iSubItem;
+				pThis->sorted = false;
+				pThis->resort();
+			}
+		}
+		break;
+		case LVN_ITEMACTIVATE:
+		{
+			NMITEMACTIVATE* pInfo = (NMITEMACTIVATE*)lParam;
+			if (pThis)
+			{
+				if ((pInfo->iItem >= 0 && pInfo->iItem < pThis->listEntries.size() && pThis->listEntries[pInfo->iItem].isSelected)
+					&& !(pInfo->uKeyFlags & (LVKF_CONTROL | LVKF_SHIFT)))
+				{
+					int topIdx = ListView_GetTopIndex(pInfo->hdr.hwndFrom);
+					int bottomIdx = topIdx + ListView_GetCountPerPage(pInfo->hdr.hwndFrom) + 1;
+
+					//Deselect all. Required when the Win32 dialog is closed and reopened and there are still selected items.
+					//Otherwise, the old selection would stay even when just clicking an item.
+					ListView_SetItemState(pInfo->hdr.hwndFrom, -1, 0, LVIS_SELECTED);
+					ListView_SetItemState(pInfo->hdr.hwndFrom, pInfo->iItem, LVIS_SELECTED, LVIS_SELECTED);
+				}
+			}
+		}
+		break;
+		case MC_MTN_CLOSEITEM:
+			if (((NMHDR*)lParam)->hwndFrom == GetDlgItem(hDlg, IDC_ASSETLISTMODIFYTABS))
+			{
+				MC_NMMTCLOSEITEM* pNotification = (MC_NMMTCLOSEITEM*)lParam;
+				if (!pThis->preDeleteTab(pNotification))
+					SetWindowLongPtr(hDlg, DWLP_MSGRESULT, TRUE);
+				return (INT_PTR)TRUE; //Prevent tab deletion.
+			}
+			break;
+		case MC_MTN_DELETEITEM:
+			if (((NMHDR*)lParam)->hwndFrom == GetDlgItem(hDlg, IDC_ASSETLISTMODIFYTABS))
+			{
+				MC_NMMTDELETEITEM* pNotification = (MC_NMMTDELETEITEM*)lParam;
+				pThis->onDeleteTab(pNotification);
+			}
+			break;
+		case MC_MTN_SELCHANGE:
+			if (((NMHDR*)lParam)->hwndFrom == GetDlgItem(hDlg, IDC_ASSETLISTMODIFYTABS))
+			{
+				MC_NMMTSELCHANGE* pNotification = (MC_NMMTSELCHANGE*)lParam;
+				pThis->onSwitchTabs(pNotification);
+			}
+			break;
+		case MC_MTN_DELETEALLITEMS:
+			if (((NMHDR*)lParam)->hwndFrom == GetDlgItem(hDlg, IDC_ASSETLISTMODIFYTABS))
+			{
+				SetWindowLongPtr(hDlg, DWLP_MSGRESULT, TRUE);
+				return (INT_PTR)TRUE; //When the dialog closes due to a <onHide> call, keep the internal tabs.
+			}
 			break;
 		}
 	}
+	break;
+	case WM_COMMAND:
+		wmId = LOWORD(wParam);
+		wmEvent = HIWORD(wParam);
+		switch (wmId)
+		{
+		case IDM_FILE_CLOSE:
+			//if (AskSaveAssetsInfo(pMainWindow, hDlg))
+		{
+			if (pThis)
+				pThis->pContext->getMainWindow().hideManipulateDialog(pThis);
+			else
+				SendMessage(hDlg, WM_CLOSE, 0, 0);
+		}
+		return (INT_PTR)TRUE;
+		case IDM_FILE_APPLY:
+			//Already handled in onCommand
+			break;
+		case IDM_VIEW_CONTINUESEARCH:
+			pThis->searchNext();
+			break;
+		case IDM_VIEW_SEARCHBYNAME:
+		{
+			std::shared_ptr<IFileManipulateDialog> pSelfRef = pThis->selfPtr.lock();
+			if (!pSelfRef) { assert(false); break; }
+			if (DialogBoxParam(pThis->pContext->getMainWindow().getHInstance(),
+				MAKEINTRESOURCE(IDD_SEARCHASSET),
+				pThis->hParentWnd ? pThis->hParentWnd : hDlg,
+				SearchDlgProc,
+				(LPARAM)pThis)
+				== 1)
+			{
+				pThis->searchNext();
+				EnableMenuItem(pThis->pContext->getMainWindow().getMenu(), IDM_VIEW_CONTINUESEARCH, MF_ENABLED);
+			}
+		}
+		break;
+		case IDM_VIEW_GOTOASSET:
+		{
+			std::shared_ptr<IFileManipulateDialog> pSelfRef = pThis->selfPtr.lock();
+			if (!pSelfRef) { assert(false); break; }
+			DialogBoxParam(pThis->pContext->getMainWindow().getHInstance(),
+				MAKEINTRESOURCE(IDD_GOTOASSET),
+				pThis->hParentWnd ? pThis->hParentWnd : hDlg,
+				GotoDlgProc,
+				(LPARAM)pThis);
+		}
+		break;
+		case IDM_VIEW_CONTAINERS:
+			/*if (pMainWindow->assetsInfoDialog.hContainersDlg)
+			{
+				SetWindowPos(pMainWindow->assetsInfoDialog.hContainersDlg, hDlg, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+			}
+			else
+			{
+				pMainWindow->assetsInfoDialog.hContainersDlg = CreateDialogParam(hInst, MAKEINTRESOURCE(IDD_VIEWCONTAINERS), NULL, ViewContainers, NULL);
+				if (pMainWindow->assetsInfoDialog.hContainersDlg)
+				{
+					//https://stackoverflow.com/questions/812686/can-a-window-be-always-on-top-of-just-one-other-window
+					SetWindowLongPtr(pMainWindow->assetsInfoDialog.hContainersDlg, GWLP_HWNDPARENT, (LONG_PTR)hDlg);
+					RECT targetRect = {};
+					GetWindowRect(hDlg, &targetRect);
+					SetWindowPos(pMainWindow->assetsInfoDialog.hContainersDlg, hDlg, targetRect.left, targetRect.top, 0, 0, SWP_NOSIZE);
+				}
+			}*/
+			break;
+		case IDC_VIEWDATA:
+			pThis->openViewDataTab();
+			break;
+		case IDC_DUMPDATA:
+			pThis->onExportDumpButton();
+			break;
+		case IDC_EXPORTRAW:
+			pThis->exportAssetsRaw(pThis->getSelectedAssets());
+			break;
+		case IDC_PLUGINS:
+			pThis->onPluginButton();
+			break;
+		case IDC_IMPORTRAW:
+			pThis->importAssetsRaw(pThis->getSelectedAssets());
+			break;
+		case IDC_IMPORTDUMP:
+			pThis->importAssetsDump(pThis->getSelectedAssets());
+			break;
+		case IDC_REMOVEASSET:
+			pThis->requestRemoveSelectedAssets();
+			break;
+		}
+		break;
+	case WM_SIZE:
+	{
+		HWND hTabsControl = GetDlgItem(hDlg, IDC_ASSETLISTMODIFYTABS);
+		HWND hActiveTabWnd = NULL;
+		int curTab = (int)SendMessage(hTabsControl, MC_MTM_GETCURSEL, 0, 0);
+		if (curTab != -1)
+		{
+			MC_MTITEM item = {};
+			item.dwMask = MC_MTIF_PARAM;
+			if (SendMessage(hTabsControl, MC_MTM_GETITEM, (WPARAM)curTab, (LPARAM)&item) == TRUE)
+			{
+				if (item.lParam != 0)
+					hActiveTabWnd = reinterpret_cast<AssetModifyDialog*>(item.lParam)->getWindowHandle();
+			}
+		}
+		onResize(hDlg, hActiveTabWnd);
+		break;
+	}
+	}
+
+
+
+	if (pThis) {
+		if (pThis->pContext->bulk_importedtextures) {
+			if (!(pThis->pContext->bulk_startedimportassets)) {
+				pThis->pContext->bulk_startedimportassets = true;
+				pThis->bulk_ImportAllAssets();
+			}
+		}
+
+		if (pThis->pContext->bulk_importedassets) {
+			if (*(pThis->pContext->bulk_importedassets) == true) {
+				if (!(pThis->pContext->bulk_startedsaving)) {
+					pThis->pContext->bulk_startedsaving = true;
+
+					bool applyAll = true;
+					bool ret = false;
+					for (auto dialogIt = pThis->modifyDialogs.begin(); dialogIt != pThis->modifyDialogs.end(); ++dialogIt)
+					{
+						if (*dialogIt)
+						{
+								(*dialogIt)->applyChanges();
+								ret = true;
+						}
+					}
+
+					pThis->pContext->bulk_saveAll();
+
+					if (!(pThis->pContext->bulk_notifyfile.empty())) {
+						std::ofstream os;
+						os.open(pThis->pContext->bulk_notifyfile, std::ios_base::app);
+						os << "1" << std::endl;
+						os.close();
+					}
+
+					std::exit(0);
+
+				}
+			}
+		}
+	}
+
+
 	return ret;
 }
 
@@ -2350,7 +2512,7 @@ bool AssetListDialog::selectAsset(unsigned int fileID, pathid_t pathID)
 	}
 	if (targetIndex == SIZE_MAX)
 		return false;
-	
+
 	ListView_SetItemState(hAssetList, -1, 0, LVIS_FOCUSED | LVIS_SELECTED);
 	ListView_SetItemState(hAssetList, static_cast<int>(targetIndex), LVIS_FOCUSED | LVIS_SELECTED, LVIS_FOCUSED | LVIS_SELECTED);
 	ListView_EnsureVisible(hAssetList, static_cast<int>(targetIndex), FALSE);
@@ -2360,11 +2522,11 @@ bool AssetListDialog::selectAsset(unsigned int fileID, pathid_t pathID)
 void AssetListDialog::addModifyDialog(std::shared_ptr<AssetModifyDialog> dialogTmp)
 {
 	HWND hTabsControl = GetDlgItem(this->hDialog, IDC_ASSETLISTMODIFYTABS);
-	AssetModifyDialog *pDialog = dialogTmp.get();
+	AssetModifyDialog* pDialog = dialogTmp.get();
 
 	size_t newTabIdx = this->modifyDialogs.size() + 1;
 	pDialog->selfHandle = this->modifyDialogs.insert(this->modifyDialogs.end(), std::move(dialogTmp));
-	
+
 	std::string tabName8 = pDialog->getTabName();
 	auto upTabNameT = unique_MultiByteToTCHAR(tabName8.c_str());
 	MC_MTITEM newItem = {};
@@ -2374,7 +2536,7 @@ void AssetListDialog::addModifyDialog(std::shared_ptr<AssetModifyDialog> dialogT
 	SendMessage(hTabsControl, MC_MTM_INSERTITEM, (WPARAM)newTabIdx, (LPARAM)&newItem);
 	SendMessage(hTabsControl, MC_MTM_SETCURSEL, (WPARAM)newTabIdx, 0); //Also sends a SELCHANGE notification.
 }
-void AssetListDialog::removeModifyDialog(AssetModifyDialog *pModifyDialog)
+void AssetListDialog::removeModifyDialog(AssetModifyDialog* pModifyDialog)
 {
 	HWND hTabsControl = (this->hDialog == NULL) ? NULL : GetDlgItem(this->hDialog, IDC_ASSETLISTMODIFYTABS);
 	if (this->hDialog == NULL || hTabsControl == NULL)
@@ -2401,27 +2563,27 @@ void AssetListDialog::removeModifyDialog(AssetModifyDialog *pModifyDialog)
 		}
 	}
 }
-std::shared_ptr<AssetModifyDialog> AssetListDialog::getModifyDialogRef(AssetModifyDialog *pDialog)
+std::shared_ptr<AssetModifyDialog> AssetListDialog::getModifyDialogRef(AssetModifyDialog* pDialog)
 {
 	if (pDialog->selfHandle == this->modifyDialogs.end())
 		return std::shared_ptr<AssetModifyDialog>();
 	return *pDialog->selfHandle;
 }
 
-bool AssetListDialog::preDeleteTab(MC_NMMTCLOSEITEM *pNotification)
+bool AssetListDialog::preDeleteTab(MC_NMMTCLOSEITEM* pNotification)
 {
 	if (pNotification->lParam == 0) //Asset list tab
 		return false;
-	AssetModifyDialog *pModifyDialog = reinterpret_cast<AssetModifyDialog*>(pNotification->lParam);
+	AssetModifyDialog* pModifyDialog = reinterpret_cast<AssetModifyDialog*>(pNotification->lParam);
 	bool changesApplyable = false;
 	if (pModifyDialog->hasUnappliedChanges(&changesApplyable))
 	{
 		SendMessage(pNotification->hdr.hwndFrom, MC_MTM_SETCURSEL, (WPARAM)pNotification->iItem, 0);
 		if (changesApplyable)
 		{
-			switch (MessageBox(this->hDialog, 
-				TEXT("This tab has unsaved changes.\nDo you want to apply the changes before closing the tab?"), 
-				TEXT("Asset Bundle Extractor"), 
+			switch (MessageBox(this->hDialog,
+				TEXT("This tab has unsaved changes.\nDo you want to apply the changes before closing the tab?"),
+				TEXT("Asset Bundle Extractor"),
 				MB_YESNOCANCEL | MB_ICONWARNING | MB_DEFBUTTON3))
 			{
 			case IDYES:
@@ -2434,9 +2596,9 @@ bool AssetListDialog::preDeleteTab(MC_NMMTCLOSEITEM *pNotification)
 				return false; //Don't close tab.
 			}
 		}
-		else if (IDYES == MessageBox(this->hDialog, 
-			TEXT("This tab has unsaved changes.\nDo you want to close the tab anyway and discard any unsaved changes?"), 
-			TEXT("Asset Bundle Extractor"), 
+		else if (IDYES == MessageBox(this->hDialog,
+			TEXT("This tab has unsaved changes.\nDo you want to close the tab anyway and discard any unsaved changes?"),
+			TEXT("Asset Bundle Extractor"),
 			MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2))
 		{
 			return true;
@@ -2445,11 +2607,11 @@ bool AssetListDialog::preDeleteTab(MC_NMMTCLOSEITEM *pNotification)
 	}
 	return true;
 }
-void AssetListDialog::onDeleteTab(MC_NMMTDELETEITEM *pNotification)
+void AssetListDialog::onDeleteTab(MC_NMMTDELETEITEM* pNotification)
 {
 	if (pNotification->lParam != 0)
 	{
-		AssetModifyDialog *pModifyDialog = reinterpret_cast<AssetModifyDialog*>(pNotification->lParam);
+		AssetModifyDialog* pModifyDialog = reinterpret_cast<AssetModifyDialog*>(pNotification->lParam);
 		pModifyDialog->onHide();
 		pModifyDialog->onDestroy();
 		if (pModifyDialog == pActiveModifyDialog.get())
@@ -2466,7 +2628,7 @@ void AssetListDialog::onDeleteTab(MC_NMMTDELETEITEM *pNotification)
 		}
 	}
 }
-void AssetListDialog::onSwitchTabs(MC_NMMTSELCHANGE *pNotification)
+void AssetListDialog::onSwitchTabs(MC_NMMTSELCHANGE* pNotification)
 {
 	HWND newDialogHandle = NULL;
 	bool runResize = false;
@@ -2475,7 +2637,7 @@ void AssetListDialog::onSwitchTabs(MC_NMMTSELCHANGE *pNotification)
 		runResize = true;
 		if (pNotification->lParamOld != 0)
 		{
-			AssetModifyDialog *pOldModifyDialog = reinterpret_cast<AssetModifyDialog*>(pNotification->lParamOld);
+			AssetModifyDialog* pOldModifyDialog = reinterpret_cast<AssetModifyDialog*>(pNotification->lParamOld);
 			HWND oldDialogHandle = pOldModifyDialog->getWindowHandle();
 			if (oldDialogHandle != NULL)
 				ShowWindow(oldDialogHandle, SW_HIDE);
@@ -2483,7 +2645,7 @@ void AssetListDialog::onSwitchTabs(MC_NMMTSELCHANGE *pNotification)
 		}
 		if (pNotification->lParamNew != 0)
 		{
-			AssetModifyDialog *pNewModifyDialog = reinterpret_cast<AssetModifyDialog*>(pNotification->lParamNew);
+			AssetModifyDialog* pNewModifyDialog = reinterpret_cast<AssetModifyDialog*>(pNotification->lParamNew);
 			for (auto tabListIt = modifyDialogs.begin(); tabListIt != modifyDialogs.end(); ++tabListIt)
 			{
 				if (tabListIt->get() == pNewModifyDialog)
@@ -2637,9 +2799,9 @@ void AssetListDialog::openViewDataTab(size_t selection)
 		MessageBox(this->hDialog, TEXT("Unable to find the selected asset!"), TEXT("Asset Bundle Extractor"), MB_ICONERROR);
 		return;
 	}
-	AssetInfo *pFirstEntry = nullptr;
+	AssetInfo* pFirstEntry = nullptr;
 	this->cacheEntry(selection, pFirstEntry);
-	std::shared_ptr<AssetViewModifyDialog> pSubDialog = 
+	std::shared_ptr<AssetViewModifyDialog> pSubDialog =
 		std::make_shared<AssetViewModifyDialog>(*this, *pContext, std::move(identifier), pFirstEntry ? pFirstEntry->name : std::string());
 	if (pSubDialog->init(pSubDialog, this->hDialog))
 		addModifyDialog(pSubDialog);
@@ -2715,31 +2877,49 @@ std::vector<AssetUtilDesc> AssetListDialog::getSelectedAssets()
 }
 
 template <class TaskGenerator>
-requires std::invocable<const TaskGenerator&, std::vector<AssetUtilDesc>, std::vector<std::string>>
-	&& std::convertible_to<std::invoke_result_t<const TaskGenerator&, std::vector<AssetUtilDesc>, std::vector<std::string>>,
-		std::shared_ptr<AssetImportTask>>
-void AssetListDialog::importAssetsBy(std::vector<AssetUtilDesc> assets,
-	const TaskGenerator& taskGenerator, std::string _extension, std::string _extensionRegex, std::string _extensionFilter)
+	requires std::invocable<const TaskGenerator&, std::vector<AssetUtilDesc>, std::vector<std::string>>
+&& std::convertible_to<std::invoke_result_t<const TaskGenerator&, std::vector<AssetUtilDesc>, std::vector<std::string>>,
+	std::shared_ptr<AssetImportTask>>
+	void AssetListDialog::importAssetsBy(std::vector<AssetUtilDesc> assets,
+		const TaskGenerator& taskGenerator, std::string _extension, std::string _extensionRegex, std::string _extensionFilter)
 {
 	std::vector<std::string> _importFilePaths = this->pContext->QueryAssetImportLocation(
 		assets, std::move(_extension), std::move(_extensionRegex), std::move(_extensionFilter));
 	if (_importFilePaths.size() == assets.size())
 	{
 		std::shared_ptr<AssetImportTask> pTask = taskGenerator(std::move(assets), std::move(_importFilePaths));
+		if (pContext->bulk_isBulk) {
+			pTask->bulk_setimportedassets(pContext->bulk_importedassets);
+		}
 		this->pContext->taskManager.enqueue(pTask);
 	}
 }
 
+void AssetListDialog::writeNotifyFile(std::string notifyfile, void* hwndptr) {
+	if (notifyfile != "") {
+		std::ofstream os;
+		os.open(notifyfile);
+		os << "1";
+		os.close();
+	}
+
+	std::exit(0);
+}
+
 template <class TaskGenerator>
-requires std::invocable<const TaskGenerator&, std::vector<AssetUtilDesc>, std::string>
+	requires std::invocable<const TaskGenerator&, std::vector<AssetUtilDesc>, std::string>
 && std::convertible_to<std::invoke_result_t<const TaskGenerator&, std::vector<AssetUtilDesc>, std::string>, std::shared_ptr<AssetExportTask>>
-void AssetListDialog::exportAssetsBy(std::vector<AssetUtilDesc> assets, 
+void AssetListDialog::exportAssetsBy(std::vector<AssetUtilDesc> assets,
 	const TaskGenerator& taskGenerator, std::string _extension, std::string _extensionFilter)
 {
 	std::string exportPath = this->pContext->QueryAssetExportLocation(assets, std::move(_extension), std::move(_extensionFilter));
 	if (exportPath.empty())
 		return;
 	std::shared_ptr<AssetExportTask> pTask = taskGenerator(std::move(assets), std::move(exportPath));
+	if (pContext->bulk_isBulk) {
+		pTask->notifyfile = pContext->bulk_notifyfile;
+		pTask->dpContext = pContext;
+	}
 	this->pContext->taskManager.enqueue(pTask);
 }
 

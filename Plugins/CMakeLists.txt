@@ -1,5 +1,5 @@
 add_subdirectory (Utility)
 add_subdirectory (TextAsset)
-add_subdirectory (AudioClip)
+#add_subdirectory (AudioClip)
 add_subdirectory (Texture)
 add_subdirectory (Mesh)

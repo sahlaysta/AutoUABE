@@ -102,7 +102,9 @@ public:
 
 		: AssetExportTask(std::move(_assets), "Export Texture2D", std::move(_extension), std::move(_baseDir), stopOnError),
 		appContext(appContext), exportFormat(exportFormat)
-	{}
+	{
+		this->dpContext = &appContext;
+	}
 
 	bool exportAsset(AssetUtilDesc& desc, std::string path, std::optional<std::reference_wrapper<TaskProgressManager>> progressManager)
 	{
@@ -244,7 +246,7 @@ public:
 		std::vector<struct AssetUtilDesc> selection,
 		std::string& optionName)
 	{
-		if (!PluginSupportsElements(selection))
+		if (!appContext.bulk_isBulk && !PluginSupportsElements(selection))
 			return nullptr;
 		optionName = this->optionName;
 		return std::make_unique<Runner>(appContext, std::move(selection), extension, extensionFilter, exportFormat);

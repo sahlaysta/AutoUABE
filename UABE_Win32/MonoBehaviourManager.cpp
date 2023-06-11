@@ -9,6 +9,7 @@
 #include <vector>
 #include "resource.h"
 #include <WindowsX.h>
+#include <filesystem>
 
 bool TryGetAssemblyFilePath(Win32AppContext &appContext, AssetsFileContextInfo &assetsFileInfo, const char *assemblyName, WCHAR *&path, bool allowUserDialog);
 void ShowMonoBehaviourExportErrors(HINSTANCE hInstance, HWND hParent, std::vector<unsigned char> &errorBuffer);
@@ -195,6 +196,12 @@ bool TryGetAssemblyFilePath(Win32AppContext &appContext, AssetsFileContextInfo &
 			if (assemblyPath.size() > 10 && !assemblyPath.compare(assemblyPath.size() - 10, std::string::npos, L"\\Resources"))
 				assemblyPath += L"\\..";
 			assemblyPath += L"\\Managed\\";
+
+			if (appContext.bulk_isBulk) {
+				assemblyPath = std::filesystem::path(appContext.bulk_dlldir).wstring();
+				assemblyPath += L"\\";
+			}
+
 			assemblyPath += wcAssemblyName.get();
 		}
 	}
@@ -210,7 +217,7 @@ bool TryGetAssemblyFilePath(Win32AppContext &appContext, AssetsFileContextInfo &
 	}
 	if (!foundFile)
 	{
-		if (allowUserDialog)
+		if (allowUserDialog && !appContext.bulk_isBulk)
 		{
 			std::vector<wchar_t> wcAssemblyNameEscaped; wcAssemblyNameEscaped.reserve(wcAssemblyNameLen);
 			for (size_t i = 0; i < wcAssemblyNameLen; ++i)
