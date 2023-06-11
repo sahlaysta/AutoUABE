@@ -9,13 +9,11 @@ Right now it supports exporting/importing text assets and Texture2D assets.
 - openlist.txt: contains the files you want to open, separated by new line
 - dlldir: the directory of the Unity DLL files, this is usually the Unity game 'Managed' folder
 
-Export:
+Export: `AssetBundleExtractor.exe bulkexport --openlist <openlist.txt> --dlldir <dlldir> --exportdir <exportdir>`
 
-`AssetBundleExtractor.exe bulkexport --openlist <openlist.txt> --dlldir <dlldir> --exportdir <exportdir>`
+Import: `AssetBundleExtractor.exe bulkimport --openlist <openlist.txt> --dlldir <dlldir> --importdir <importdir> --savedir <savedir>`
 
-Import:
-
-`AssetBundleExtractor.exe bulkimport --openlist <openlist.txt> --dlldir <dlldir> --importdir <importdir> --savedir <savedir>`
+(optional) `--notifyfile`: writes to file when finished export/import
 
 ---
 
