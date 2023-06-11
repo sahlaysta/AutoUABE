@@ -5,8 +5,10 @@
 #include <mCtrl\mditab.h>
 #include "BatchImportDialog.h"
 #include "Win32PluginManager.h"
+#include <fstream>
+#include <filesystem>
 
-Win32AppContext::Win32AppContext(HINSTANCE hInstance, const std::string &baseDir)
+Win32AppContext::Win32AppContext(HINSTANCE hInstance, const std::string& baseDir)
 	: mainWindow(hInstance), baseDir(baseDir), handlingMessages(false), messagePosted(false),
 	gcMemoryLimit(0), gcMinAge(0)
 {
@@ -18,13 +20,13 @@ Win32AppContext::~Win32AppContext()
 	DeleteCriticalSection(&this->messageMutex);
 }
 
-void Win32AppContext::signalMainThread(EAppContextMsg message, void *args)
+void Win32AppContext::signalMainThread(EAppContextMsg message, void* args)
 {
 	bool notifyMainThread = true;
 	EnterCriticalSection(&this->messageMutex);
 	if (!this->messageQueue.empty() && messagePosted)
 		notifyMainThread = false; //No need to send another notification.
-	this->messageQueue.push_back(std::pair<EAppContextMsg,void*>(message, args));
+	this->messageQueue.push_back(std::pair<EAppContextMsg, void*>(message, args));
 	if (mainWindow.hDlg != NULL)
 	{
 		if (notifyMainThread)
@@ -41,7 +43,7 @@ void Win32AppContext::signalMainThread(EAppContextMsg message, void *args)
 }
 void Win32AppContext::handleMessages()
 {
-	std::vector<std::pair<EAppContextMsg,void*>> messageQueue;
+	std::vector<std::pair<EAppContextMsg, void*>> messageQueue;
 	EnterCriticalSection(&this->messageMutex);
 	if (handlingMessages)
 	{
@@ -58,7 +60,7 @@ void Win32AppContext::handleMessages()
 		for (size_t i = 0; i < messageQueue.size(); ++i)
 		{
 			EAppContextMsg message = messageQueue[i].first;
-			void *args = messageQueue[i].second;
+			void* args = messageQueue[i].second;
 			this->processMessage(message, args);
 		}
 		messageQueue.clear();
@@ -67,54 +69,54 @@ void Win32AppContext::handleMessages()
 	handlingMessages = false;
 	LeaveCriticalSection(&this->messageMutex);
 }
-bool Win32AppContext::processMessage(EAppContextMsg message, void *args)
+bool Win32AppContext::processMessage(EAppContextMsg message, void* args)
 {
 	//switch ((EWin32AppContextMsg)message)
 	//{
 	//	default:
-			return AppContext::processMessage(message, args);
+	return AppContext::processMessage(message, args);
 	//}
 }
 
-void Win32AppContext::OnUpdateContainers(AssetsFileContextInfo *info)
+void Win32AppContext::OnUpdateContainers(AssetsFileContextInfo* info)
 {
 	mainWindow.OnUpdateContainers(info);
 }
-void Win32AppContext::OnChangeAsset(AssetsFileContextInfo *pFile, pathid_t pathID, bool wasRemoved)
+void Win32AppContext::OnChangeAsset(AssetsFileContextInfo* pFile, pathid_t pathID, bool wasRemoved)
 {
 	AppContext::OnChangeAsset(pFile, pathID, wasRemoved);
 	mainWindow.OnChangeAsset(pFile, pathID, wasRemoved);
 }
-void Win32AppContext::OnChangeBundleEntry(BundleFileContextInfo *pFile, size_t index)
+void Win32AppContext::OnChangeBundleEntry(BundleFileContextInfo* pFile, size_t index)
 {
 	AppContext::OnChangeBundleEntry(pFile, index);
 	mainWindow.OnChangeBundleEntry(pFile, index);
 }
-void Win32AppContext::OnUpdateDependencies(AssetsFileContextInfo *info, size_t from, size_t to)
+void Win32AppContext::OnUpdateDependencies(AssetsFileContextInfo* info, size_t from, size_t to)
 {
 	AppContext::OnUpdateDependencies(info, from, to);
 	mainWindow.OnUpdateDependencies(info, from, to);
 } //from/to: indices for info->references
-std::shared_ptr<FileContextInfo> Win32AppContext::OnFileOpenAsBundle(std::shared_ptr<FileOpenTask> pTask, BundleFileContext *pContext,
+std::shared_ptr<FileContextInfo> Win32AppContext::OnFileOpenAsBundle(std::shared_ptr<FileOpenTask> pTask, BundleFileContext* pContext,
 	EBundleFileOpenStatus openStatus, unsigned int parentFileID, unsigned int directoryEntryIdx)
 {
 	std::shared_ptr<FileContextInfo> pInfo = AppContext::OnFileOpenAsBundle(pTask, pContext, openStatus, parentFileID, directoryEntryIdx);
 	if (pInfo == nullptr)
 		return nullptr;
-	BundleFileContextInfo *pInfo_Bundle = reinterpret_cast<BundleFileContextInfo*>(pInfo.get());
+	BundleFileContextInfo* pInfo_Bundle = reinterpret_cast<BundleFileContextInfo*>(pInfo.get());
 	if (openStatus != BundleFileOpenStatus_CompressedDirectory)
 		pInfo_Bundle->onDirectoryReady(*this);
 	if (!mainWindow.OnFileEntryLoadSuccess(pTask.get(), pInfo, static_cast<TaskResult>(openStatus)))
 		RemoveContextInfo(pInfo.get());
 	return pInfo;
 }
-std::shared_ptr<FileContextInfo> Win32AppContext::OnFileOpenAsAssets(std::shared_ptr<FileOpenTask> pTask, AssetsFileContext *pContext,
+std::shared_ptr<FileContextInfo> Win32AppContext::OnFileOpenAsAssets(std::shared_ptr<FileOpenTask> pTask, AssetsFileContext* pContext,
 	EAssetsFileOpenStatus openStatus, unsigned int parentFileID, unsigned int directoryEntryIdx)
 {
 	std::shared_ptr<FileContextInfo> pInfo = AppContext::OnFileOpenAsAssets(pTask, pContext, openStatus, parentFileID, directoryEntryIdx);
 	if (pInfo == nullptr)
 		return nullptr;
-	AssetsFileContextInfo *pInfo_Assets = reinterpret_cast<AssetsFileContextInfo*>(pInfo.get());
+	AssetsFileContextInfo* pInfo_Assets = reinterpret_cast<AssetsFileContextInfo*>(pInfo.get());
 	if (mainWindow.OnFileEntryLoadSuccess(pTask.get(), pInfo, static_cast<TaskResult>(openStatus)))
 	{
 		if (!pInfo_Assets->FindClassDatabase(classPackage))
@@ -125,7 +127,7 @@ std::shared_ptr<FileContextInfo> Win32AppContext::OnFileOpenAsAssets(std::shared
 		RemoveContextInfo(pInfo.get());
 	return pInfo;
 }
-std::shared_ptr<FileContextInfo> Win32AppContext::OnFileOpenAsResources(std::shared_ptr<FileOpenTask> pTask, ResourcesFileContext *pContext,
+std::shared_ptr<FileContextInfo> Win32AppContext::OnFileOpenAsResources(std::shared_ptr<FileOpenTask> pTask, ResourcesFileContext* pContext,
 	unsigned int parentFileID, unsigned int directoryEntryIdx)
 {
 	std::shared_ptr<FileContextInfo> pInfo = AppContext::OnFileOpenAsResources(pTask, pContext, parentFileID, directoryEntryIdx);
@@ -135,7 +137,7 @@ std::shared_ptr<FileContextInfo> Win32AppContext::OnFileOpenAsResources(std::sha
 		RemoveContextInfo(pInfo.get());
 	return pInfo;
 }
-std::shared_ptr<FileContextInfo> Win32AppContext::OnFileOpenAsGeneric(std::shared_ptr<FileOpenTask> pTask, GenericFileContext *pContext, unsigned int parentFileID, unsigned int directoryEntryIdx)
+std::shared_ptr<FileContextInfo> Win32AppContext::OnFileOpenAsGeneric(std::shared_ptr<FileOpenTask> pTask, GenericFileContext* pContext, unsigned int parentFileID, unsigned int directoryEntryIdx)
 {
 	std::shared_ptr<FileContextInfo> pInfo = AppContext::OnFileOpenAsGeneric(pTask, pContext, parentFileID, directoryEntryIdx);
 	if (pInfo == nullptr)
@@ -144,18 +146,18 @@ std::shared_ptr<FileContextInfo> Win32AppContext::OnFileOpenAsGeneric(std::share
 		RemoveContextInfo(pInfo.get());
 	return pInfo;
 }
-void Win32AppContext::OnFileOpenFail(std::shared_ptr<FileOpenTask> pTask, std::string &logText)
+void Win32AppContext::OnFileOpenFail(std::shared_ptr<FileOpenTask> pTask, std::string& logText)
 {
 	mainWindow.OnFileEntryLoadFailure(pTask.get(), logText);
 }
-void Win32AppContext::OnDecompressBundle(BundleFileContextInfo::DecompressTask *pTask, TaskResult result)
+void Win32AppContext::OnDecompressBundle(BundleFileContextInfo::DecompressTask* pTask, TaskResult result)
 {
 	if (result >= 0)
 		mainWindow.OnDecompressSuccess(pTask);
 	else
 		mainWindow.OnDecompressFailure(pTask);
 }
-void Win32AppContext::RemoveContextInfo(FileContextInfo *info)
+void Win32AppContext::RemoveContextInfo(FileContextInfo* info)
 {
 	AppContext::RemoveContextInfo(info);
 	mainWindow.OnRemoveContextInfo(info);
@@ -173,7 +175,8 @@ void Win32AppContext::LoadSettings()
 	//TODO: Load from settings file.
 }
 
-int Win32AppContext::Run(size_t argc, char **argv)
+
+int Win32AppContext::Run(size_t argc, char** argv)
 {
 	LoadSettings();
 	std::string loadErrorMessage;
@@ -194,32 +197,198 @@ int Win32AppContext::Run(size_t argc, char **argv)
 
 	mainWindow.Initialize();
 	loadAllPlugins(*this, this->plugins, this->getBaseDir() + "./Plugins");
+
+	bulk_RunBulk();
+
 	int ret = mainWindow.HandleMessages();
-    mcTreeList_Terminate();
+	mcTreeList_Terminate();
 	//Wait for all tasks to complete.
 	taskManager.setMaxThreads(0);
 	return ret;
 }
 
+INT_PTR CALLBACK bulk_DlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
+{
+	TCHAR lpszPassword[16];
+	WORD cchPassword;
+
+	switch (message)
+	{
+	case WM_INITDIALOG:
+		return TRUE;
+	}
+	return FALSE;
+
+	UNREFERENCED_PARAMETER(lParam);
+}
+
+void Win32AppContext::bulk_RunBulk() {
+	const size_t ntheargs = __argc - 1;
+	auto theargs = __wargv + 1;
+
+	bool bulkexport = false;
+	bool bulkimport = false;
+	std::string openlist = std::string("");
+	std::string dlldir = std::string("");
+	std::string exportdir = std::string("");
+	std::string importdir = std::string("");
+	std::string savedir = std::string("");
+	std::string notifyfile = std::string("");
+
+	for (size_t i = 0; i < ntheargs;) {
+		bool islast = i == ntheargs - 1;
+
+		const wchar_t* thearg = theargs[i];
+		size_t strlen = wcslen(thearg);
+		if (wcsncmp(thearg, L"bulkexport", strlen) == 0) {
+			bulkexport = true;
+		} else if (wcsncmp(thearg, L"bulkimport", strlen) == 0) {
+			bulkimport = true;
+		} else if (wcsncmp(thearg, L"--openlist", strlen) == 0) {
+			if (islast) throw std::runtime_error("Invalid args");
+			i++;
+			thearg = theargs[i];
+			openlist = std::filesystem::path(thearg).string();
+		} else if (wcsncmp(thearg, L"--dlldir", strlen) == 0) {
+			if (islast) throw std::runtime_error("Invalid args");
+			i++;
+			thearg = theargs[i];
+			dlldir = std::filesystem::path(thearg).string();
+		} else if (wcsncmp(thearg, L"--importdir", strlen) == 0) {
+			if (islast) throw std::runtime_error("Invalid args");
+			i++;
+			thearg = theargs[i];
+			importdir = std::filesystem::path(thearg).string();
+		} else if (wcsncmp(thearg, L"--exportdir", strlen) == 0) {
+			if (islast) throw std::runtime_error("Invalid args");
+			i++;
+			thearg = theargs[i];
+			exportdir = std::filesystem::path(thearg).string();
+		} else if (wcsncmp(thearg, L"--savedir", strlen) == 0) {
+			if (islast) throw std::runtime_error("Invalid args");
+			i++;
+			thearg = theargs[i];
+			savedir = std::filesystem::path(thearg).string();
+		} else if (wcsncmp(thearg, L"--notifyfile", strlen) == 0) {
+			if (islast) throw std::runtime_error("Invalid args");
+			i++;
+			thearg = theargs[i];
+			notifyfile = std::filesystem::path(thearg).string();
+		}
+
+		i++;
+	}
+
+	if (bulkexport && bulkimport) throw std::runtime_error("Invalid args");
+
+	if (bulkexport) {
+		this->bulk_isBulk = true;
+
+		if (openlist.empty() || dlldir.empty() || exportdir.empty()) {
+			throw std::runtime_error("Invalid args");
+		}
+
+		std::vector<std::string> filepaths;
+		std::ifstream is;
+		is.open(openlist);
+		std::string fileline;
+		while (is >> fileline) {
+			filepaths.push_back(fileline);
+		}
+		is.close();
+
+		this->bulk_nfiles_total = filepaths.size();
+		this->bulk_dlldir = dlldir;
+		this->bulk_exportdir = exportdir;
+		this->bulk_notifyfile = notifyfile;
+
+		for (std::string filepath : filepaths) {
+			mainWindow.bulk_OpenFile(filepath);
+		}
+
+		mainWindow.bulk_SelectAll();
+
+		while (true) {
+			MessageBox(getMainWindow().getWindow(), TEXT("Running AutoUABE.\n\nSee the progress in bottom left."), TEXT("AutoUABE"), 0);
+		}
+	}
+
+	if (bulkimport) {
+		this->bulk_isBulk = true;
+		this->bulk_isImport = true;
+
+		if (openlist.empty() || dlldir.empty() || importdir.empty() || savedir.empty()) {
+			throw std::runtime_error("Invalid args");
+		}
+
+		std::vector<std::string> filepaths;
+		std::ifstream is;
+		is.open(openlist);
+		std::string fileline;
+		while (is >> fileline) {
+			filepaths.push_back(fileline);
+		}
+		is.close();
+
+		this->bulk_nfiles_total = filepaths.size();
+		this->bulk_dlldir = dlldir;
+		this->bulk_importdir = importdir;
+		this->bulk_savedir = savedir;
+		this->bulk_notifyfile = notifyfile;
+
+		for (std::string filepath : filepaths) {
+			mainWindow.bulk_OpenFile(filepath);
+		}
+
+		mainWindow.bulk_SelectAll();
+
+		while (true) {
+			MessageBox(getMainWindow().getWindow(), TEXT("Running AutoUABE.\n\nSee the progress in bottom left."), TEXT("AutoUABE"), 0);
+		}
+	}
+}
+
+void AppContext::bulk_doneExportTexture() {
+	Win32AppContext* pContext = dynamic_cast<Win32AppContext*>(this);
+	pContext->getMainWindow().bulk_ExportAllAssets();
+}
+
+void AppContext::bulk_saveAll() {
+	Win32AppContext* pContext = dynamic_cast<Win32AppContext*>(this);
+	pContext->getMainWindow().bulk_SaveAll();
+}
+
 bool Win32AppContext::ShowAssetBatchImportDialog(IAssetBatchImportDesc* pDesc, std::string _basePath)
 {
 	CBatchImportDialog dialog(mainWindow.getHInstance(), pDesc, nullptr, std::move(_basePath));
+	if (bulk_isBulk) {
+		dialog.bulk_doinitok();
+		return true;
+	}
 	return dialog.ShowModal(mainWindow.getWindow());
 }
 
 bool Win32AppContext::ShowAssetBatchImportDialog(IAssetBatchImportDesc* pDesc, IWin32AssetBatchImportDesc* pDescWin32, std::string _basePath)
 {
 	CBatchImportDialog dialog(mainWindow.getHInstance(), pDesc, pDescWin32, std::move(_basePath));
+	if (bulk_isBulk) {
+		dialog.bulk_doinitok();
+		return true;
+	}
 	return dialog.ShowModal(mainWindow.getWindow());
 }
 
 std::string Win32AppContext::QueryAssetExportLocation(const std::vector<struct AssetUtilDesc>& assets,
-	const std::string &extension, const std::string &extensionFilter)
+	const std::string& extension, const std::string& extensionFilter)
 {
 	if (assets.empty())
 		return "";
 	if (assets.size() > 1)
 	{
+		if (this->bulk_isBulk) {
+			return this->bulk_exportdir;
+		}
+
 		WCHAR* folderPathW = nullptr;
 		if (!ShowFolderSelectDialog(this->getMainWindow().getWindow(), &folderPathW, L"Select an output directory", UABE_FILEDIALOG_EXPIMPASSET_GUID))
 			return "";
@@ -243,6 +412,15 @@ std::string Win32AppContext::QueryAssetExportLocation(const std::vector<struct A
 		std::string exportPath = assetToExport.makeExportFilePath(_tmp, extension);
 		auto pExportPathT = unique_MultiByteToTCHAR(exportPath.c_str());
 
+		if (this->bulk_isBulk) {
+
+			auto pFilePath8 = unique_WideToMultiByte(pExportPathT.get());
+
+			auto filename = std::filesystem::path(std::string(pFilePath8.get())).filename();
+			auto retfile = std::filesystem::path(this->bulk_exportdir) / filename;
+			return retfile.string();
+		}
+
 		auto pExtensionFilterW = unique_MultiByteToWide(extensionFilter.c_str());
 		WCHAR* filePathW = nullptr;
 		if (FAILED(ShowFileSaveDialog(this->getMainWindow().getWindow(), &filePathW, pExtensionFilterW.get(), nullptr,
@@ -259,11 +437,14 @@ std::string Win32AppContext::QueryAssetExportLocation(const std::vector<struct A
 std::vector<std::string> Win32AppContext::QueryAssetImportLocation(std::vector<AssetUtilDesc>& assets,
 	std::string extension, std::string _extensionRegex, std::string extensionFilter)
 {
-
 	if (assets.empty())
 		return {};
 	CWin32GenericBatchImportDialogDesc importDesc(assets, std::move(_extensionRegex), extensionFilter);
-	if (importDesc.getElements().size() > 1)
+
+	if (bulk_isBulk) {
+		bool doImport = this->ShowAssetBatchImportDialog(&importDesc, &importDesc, bulk_importdir);
+	}
+	else if (importDesc.getElements().size() > 1)
 	{
 		WCHAR* folderPathW = nullptr;
 		if (!ShowFolderSelectDialog(this->getMainWindow().getWindow(), &folderPathW, L"Select an input directory", UABE_FILEDIALOG_EXPIMPASSET_GUID))

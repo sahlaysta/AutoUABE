@@ -59,6 +59,7 @@ protected:
 			bool tryAsBundle=true, bool tryAsAssets=true, bool tryAsResources=true, bool tryAsGeneric=false);
 		UABE_Generic_API void setParentContextInfo(std::shared_ptr<BundleFileContextInfo> &pParentContextInfo);
 		UABE_Generic_API const std::string &getName();
+		UABE_Generic_API TaskResult bulk_originalExecute(TaskProgressManager& progressManager);
 		UABE_Generic_API TaskResult execute(TaskProgressManager &progressManager);
 	};
 
@@ -91,6 +92,27 @@ public:
 	TaskManager taskManager;
 	//Passes a message to the main thread. On Win32, PostMessage can be used; for console, custom synchronization routines are required.
 	UABE_Generic_API virtual void signalMainThread(EAppContextMsg message, void *args)=0;
+
+	bool bulk_isBulk = false;
+	bool bulk_isImport = false;
+	std::string bulk_dlldir;
+	std::string bulk_exportdir;
+	std::string bulk_importdir;
+	std::string bulk_savedir;
+	std::string bulk_notifyfile;
+	volatile size_t bulk_niter = 0;
+	volatile bool bulk_importedtextures = false;
+	volatile bool bulk_startedimportassets = false;
+	bool* bulk_importedassets = new bool(false);
+	bool bulk_startedsaving = false;
+	std::mutex bulk_mutex;
+	UABE_Generic_API virtual void bulk_doneExportTexture();
+	UABE_Generic_API virtual void bulk_saveAll();
+
+	volatile size_t bulk_nfiles = 0;
+	size_t bulk_nfiles_total = 0;
+
+	void* bulk_ald = 0;
 
 	//Uses the signalMainThread mechanism to post a callback request on the main thread.
 	//No guarantees are made regarding the callback timing.

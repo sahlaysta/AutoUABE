@@ -8,6 +8,7 @@
 #include <unordered_map>
 #include <exception>
 #include <functional>
+#include <optional>
 
 struct AssetUtilDesc
 {
@@ -120,6 +121,9 @@ class AssetExportTask : public ITask
 	bool stopOnError;
 	bool writeOnCompletionOnly;
 public:
+	std::string notifyfile;
+	AppContext* dpContext = 0;
+
 	//If assets.size() == 1, baseDir will be used as the full path for the asset.
 	//Otherwise, the output paths will be generated via AssetUtilDesc::makeExportFilePath(..).
 	//extension: File extension, e.g. ".dat", or "" for no extension.
@@ -130,6 +134,7 @@ public:
 		bool writeOnCompletionOnly = false);
 	UABE_Generic_API const std::string& getName();
 	UABE_Generic_API TaskResult execute(TaskProgressManager& progressManager);
+	UABE_Generic_API TaskResult bulk_originalExecute(TaskProgressManager& progressManager);
 	//Can be called directly, without a preceding execute call.
 	//asset: Asset to export (not required to be within the assets vector).
 	//path: Output file path.
@@ -268,6 +273,7 @@ class AssetImportTask : public ITask
 	std::vector<std::string> importFilePaths;
 	std::string taskName;
 	bool stopOnError;
+	bool* bulk_vimportedassets = 0;
 public:
 	//If assets.size() == 1, baseDir will be used as the full path for the asset.
 	//Otherwise, the output paths will be generated via AssetUtilDesc::makeExportFilePath(..).
@@ -275,7 +281,9 @@ public:
 	UABE_Generic_API AssetImportTask(std::vector<AssetUtilDesc> assets, std::vector<std::string> importFilePaths,
 		std::string taskName, bool stopOnError = false);
 	UABE_Generic_API const std::string& getName();
+	UABE_Generic_API TaskResult bulk_originalExecute(TaskProgressManager& progressManager);
 	UABE_Generic_API TaskResult execute(TaskProgressManager& progressManager);
+	UABE_Generic_API void bulk_setimportedassets(bool* v) { bulk_vimportedassets = v; }
 	//Can be called directly, without a preceding execute call.
 	//asset: Asset to export (not required to be within the assets vector).
 	//path: Output file path.

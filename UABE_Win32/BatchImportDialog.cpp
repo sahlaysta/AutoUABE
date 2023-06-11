@@ -6,6 +6,7 @@
 #include "../UABE_Generic/AssetPluginUtil.h"
 #include "resource.h"
 #include <regex>
+#include <fstream>
 
 bool CBatchImportDialog::SearchDirectory(const std::wstring &path, const std::string &relativePath, std::vector<std::regex> &regexs, bool searchSubDirs)
 {
@@ -226,6 +227,7 @@ INT_PTR CALLBACK CBatchImportDialog::WindowHandler(HWND hDlg, UINT message, WPAR
 			SetWindowLongPtr(hDlg, GWLP_USERDATA, lParam);
 			pThis = (CBatchImportDialog*)lParam;
 			pThis->hWnd = hDlg;
+			pThis->bulk_inited = true;
 			
 			pThis->dialogSortColumnIdx = 0;
 			pThis->dialogSortDirReverse = true;
@@ -584,5 +586,94 @@ bool CBatchImportDialog::ShowModeless(HWND hParentWnd)
 		this->modeless = true;
 		this->hWnd = CreateDialogIndirectParam(this->hInstance, (DLGTEMPLATE*)pDlgTemplateHeader, this->hParentWnd, WindowHandler, (LPARAM)this);
 		return (this->hWnd != NULL);
+	}
+}
+
+void CBatchImportDialog::bulk_doinitok() {
+	CBatchImportDialog* pThis = this;
+	std::vector<IAssetBatchImportDesc::AssetDesc> newAssetDescs;
+	if (pThis->pDesc->GetImportableAssetDescs(newAssetDescs))
+	{
+		pThis->assetInfo.resize(newAssetDescs.size());
+
+		if (pThis->GenerateFileLists())
+		{
+			LVITEM item;
+			ZeroMemory(&item, sizeof(LVITEM));
+			item.iSubItem = 0;
+			item.cchTextMax = 255;
+			for (size_t i = 0; i < std::min<size_t>(INT_MAX, newAssetDescs.size()); i++)
+			{
+				const std::string& curDescription = newAssetDescs[i].description;
+				pThis->assetInfo[i].description = curDescription;
+
+				size_t _strLen = 0;
+				TCHAR* tcName = _MultiByteToTCHAR(curDescription.c_str(), _strLen);
+
+				item.mask = (tcName ? LVIF_TEXT : 0) | LVIF_PARAM;
+				item.lParam = i;
+				item.iItem = (int)i;
+				item.iSubItem = 0;
+				item.pszText = tcName;
+
+				//ListView_InsertItem(hAssetList, &item);
+
+				_FreeTCHAR(tcName);
+
+				const std::string& curAssetsFileName = newAssetDescs[i].assetsFileName;
+				pThis->assetInfo[i].assetsFileName = curAssetsFileName;
+
+				TCHAR* tcAssetsFileName = _MultiByteToTCHAR(curAssetsFileName.c_str(), _strLen);
+
+				item.mask = (tcAssetsFileName ? LVIF_TEXT : 0);
+				item.iSubItem = 1;
+				item.pszText = tcAssetsFileName;
+				//ListView_SetItem(hAssetList, &item);
+
+				_FreeTCHAR(tcAssetsFileName);
+
+				pThis->assetInfo[i].pathId = newAssetDescs[i].pathID;
+				TCHAR pathIdBuf[32];
+				_stprintf_s(pathIdBuf, _T("%lli"), newAssetDescs[i].pathID);
+
+				item.mask = LVIF_TEXT;
+				item.iSubItem = 2;
+				item.pszText = pathIdBuf;
+				//ListView_SetItem(hAssetList, &item);
+			}
+
+			//ListView_SetItemState(hAssetList, 0, 0, LVIS_SELECTED);
+
+
+			for (size_t i = 0; i < pThis->assetInfo.size(); i++)
+			{
+				std::string fullFilePathStr;
+				const char* fullFilePathCStr = nullptr;
+				if (pThis->assetInfo[i].fileList.size() > 0)
+				{
+					if (pThis->assetInfo[i].fileList[0].isRelative)
+					{
+						if (!pThis->basePath.empty())
+						{
+							fullFilePathStr = pThis->basePath;
+							fullFilePathStr += "\\";
+						}
+						fullFilePathStr += pThis->assetInfo[i].fileList[0].path;
+						fullFilePathCStr = fullFilePathStr.c_str();
+					}
+					else
+						fullFilePathCStr = pThis->assetInfo[i].fileList[0].path.c_str();
+				}
+				pThis->pDesc->SetInputFilepath(i, fullFilePathCStr);
+			}
+			bool modeless = pThis->modeless;
+			if (pThis->closeCallback)
+			{
+				pThis->closeCallback(true);
+			}
+
+
+
+		}
 	}
 }

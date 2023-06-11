@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <chrono>
 #include <format>
+#include <fstream>
 
 std::string AssetUtilDesc::makeExportFilePath(std::unordered_map<std::string, size_t>& nameCountBuffer,
 	const std::string &extension, std::string baseDir) const
@@ -148,7 +149,29 @@ const std::string& AssetExportTask::getName()
 {
 	return taskName;
 }
+
 TaskResult AssetExportTask::execute(TaskProgressManager& progressManager)
+{
+	TaskResult ret = bulk_originalExecute(progressManager);
+
+	if (dpContext && dpContext->bulk_isBulk) {
+		std::unique_lock<std::mutex> lock(dpContext->bulk_mutex);
+		dpContext->bulk_niter++;
+		if (dpContext->bulk_niter == 2) {
+			if (!(dpContext->bulk_notifyfile.empty())) {
+				std::ofstream os;
+				os.open(dpContext->bulk_notifyfile, std::ios_base::app);
+				os << "1" << std::endl;
+				os.close();
+			}
+			std::exit(0);
+		}
+		lock.unlock();
+	}
+
+	return ret;
+}
+TaskResult AssetExportTask::bulk_originalExecute(TaskProgressManager& progressManager)
 {
 	unsigned int progressRange = static_cast<unsigned int>(std::min<size_t>(assets.size(), 10000));
 	size_t assetsPerProgressStep = assets.size() / progressRange;
@@ -683,7 +706,7 @@ void AssetExportJSONDumpTask::recursiveDumpAsset(IAssetsReader* pReader, AssetTy
 							break;
 						default:
 							if (strValue[i] < 0x20)
-								std::format_to(std::back_inserter(lineBuf), "\\u{:04u}", strValue[i]);
+								std::vformat_to(std::back_inserter(lineBuf), std::basic_string_view("\\u{:04u}"), std::make_format_args(strValue[i]));
 							break;
 						}
 						if (!lineBuf.empty())
@@ -889,7 +912,16 @@ const std::string& AssetImportTask::getName()
 {
 	return taskName;
 }
-TaskResult AssetImportTask::execute(TaskProgressManager& progressManager)
+TaskResult AssetImportTask::execute(TaskProgressManager& progressManager) {
+	TaskResult ret = bulk_originalExecute(progressManager);
+	
+	if (this->bulk_vimportedassets) {
+		*(this->bulk_vimportedassets) = true;
+	}
+
+	return ret;
+}
+TaskResult AssetImportTask::bulk_originalExecute(TaskProgressManager& progressManager)
 {
 	unsigned int progressRange = static_cast<unsigned int>(std::min<size_t>(assets.size(), 10000));
 	size_t assetsPerProgressStep = assets.size() / progressRange;

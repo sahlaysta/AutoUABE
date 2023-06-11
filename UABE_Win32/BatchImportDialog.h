@@ -32,6 +32,7 @@ class CBatchImportDialog
 	int dialogSortColumnIdx;
 	bool dialogSortDirReverse;
 	bool updatingAssetList;
+	bool bulk_inited = false;
 
 	IAssetBatchImportDesc *pDesc;
 	IWin32AssetBatchImportDesc* pDescWin32;
@@ -51,6 +52,9 @@ class CBatchImportDialog
 	//Returns whether at least one file has been found.
 	bool SearchDirectory(const std::wstring &path, const std::string &relativePath, std::vector<std::regex> &regexs, bool searchSubDirs);
 	bool GenerateFileLists();
+
+	bool bulk_visBulk = false;
+
 public:
 	//The pointer to wcBasePath must not be freed before Show() has returned!
 	UABE_Win32_API CBatchImportDialog(HINSTANCE hInstance,
@@ -60,6 +64,7 @@ public:
 	UABE_Win32_API void Hide();
 	UABE_Win32_API bool ShowModal(HWND hParentWnd);
 	UABE_Win32_API bool ShowModeless(HWND hParentWnd);
+	UABE_Win32_API void bulk_doinitok();
 	inline void SetCloseCallback(std::function<void(bool)> callback)
 	{
 		this->closeCallback = callback;
