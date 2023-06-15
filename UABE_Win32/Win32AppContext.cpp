@@ -308,8 +308,11 @@ void Win32AppContext::bulk_RunBulk() {
 
 		mainWindow.bulk_SelectAll();
 
-		while (true) {
-			MessageBox(getMainWindow().getWindow(), TEXT("Running AutoUABE.\n\nSee the progress in bottom left."), TEXT("AutoUABE"), 0);
+		this->bulk_inited = true;
+		if (GetActiveWindow() == getMainWindow().getWindow()) {
+			while (true) {
+				MessageBox(getMainWindow().getWindow(), TEXT("Running AutoUABE.\n\nSee the progress in bottom left."), TEXT("AutoUABE"), 0);
+			}
 		}
 	}
 
@@ -342,8 +345,11 @@ void Win32AppContext::bulk_RunBulk() {
 
 		mainWindow.bulk_SelectAll();
 
-		while (true) {
-			MessageBox(getMainWindow().getWindow(), TEXT("Running AutoUABE.\n\nSee the progress in bottom left."), TEXT("AutoUABE"), 0);
+		this->bulk_inited = true;
+		if (GetActiveWindow() == getMainWindow().getWindow()) {
+			while (true) {
+				MessageBox(getMainWindow().getWindow(), TEXT("Running AutoUABE.\n\nSee the progress in bottom left."), TEXT("AutoUABE"), 0);
+			}
 		}
 	}
 }

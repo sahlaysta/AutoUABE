@@ -465,6 +465,28 @@ INT_PTR CALLBACK MainWindow2::DlgProc(HWND hDlg, UINT message, WPARAM wParam, LP
 	}
 	switch (message)
 	{
+
+
+	case WM_ACTIVATE:
+		switch (wParam) {
+		case WA_ACTIVE:
+		case WA_CLICKACTIVE:
+			if (pThis && pThis->pContext) {
+				if (pThis->pContext->bulk_isBulk) {
+					if (pThis->pContext->bulk_inited) {
+						if (!(pThis->pContext->bulk_dlgshown)) {
+							pThis->pContext->bulk_dlgshown = true;
+							while (true) {
+								MessageBox(pThis->getWindow(), TEXT("Running AutoUABE.\n\nSee the progress in bottom left."), TEXT("AutoUABE"), 0);
+							}
+						}
+					}
+				}
+			}
+			break;
+		}
+		break;
+
 	case WM_APP + 0: //New messages available.
 		if (pThis && pThis->pContext)
 		{
