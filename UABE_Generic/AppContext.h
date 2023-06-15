@@ -95,6 +95,8 @@ public:
 
 	bool bulk_isBulk = false;
 	bool bulk_isImport = false;
+	bool bulk_inited = false;
+	bool bulk_dlgshown = false;
 	std::string bulk_dlldir;
 	std::string bulk_exportdir;
 	std::string bulk_importdir;
