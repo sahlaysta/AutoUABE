@@ -177,6 +177,8 @@ void AssetListDialog::bulk_ImportAllTexture2D() {
 	}
 
 	if (!foundtexture) {
+		this->pContext->bulk_startedimportassets = true;
+		this->bulk_ImportAllAssets();
 		return;
 	}
 
