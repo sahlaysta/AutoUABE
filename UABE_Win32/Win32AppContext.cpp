@@ -292,7 +292,7 @@ void Win32AppContext::bulk_RunBulk() {
 		std::ifstream is;
 		is.open(openlist);
 		std::string fileline;
-		while (is >> fileline) {
+		while (std::getline(is, fileline)) {
 			filepaths.push_back(fileline);
 		}
 		is.close();
@@ -331,7 +331,7 @@ void Win32AppContext::bulk_RunBulk() {
 		std::ifstream is;
 		is.open(openlist);
 		std::string fileline;
-		while (is >> fileline) {
+		while (std::getline(is, fileline)) {
 			filepaths.push_back(fileline);
 		}
 		is.close();
